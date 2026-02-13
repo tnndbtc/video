@@ -102,6 +102,16 @@ class TimelineNotFoundResponse(BaseModel):
     hint: str = Field(..., description="Hint for how to generate timeline")
 
 
+class SegmentDeleteResponse(BaseModel):
+    """Response after deleting a segment from the timeline."""
+
+    success: bool = Field(True, description="Whether deletion was successful")
+    deleted_index: int = Field(..., description="Index of the deleted segment")
+    new_segment_count: int = Field(..., description="New total segment count")
+    new_total_duration_ms: int = Field(..., description="New total duration in milliseconds")
+    new_edl_hash: str = Field(..., description="New EDL hash after modification")
+
+
 class TimelineStatusResponse(BaseModel):
     """Lightweight timeline status response for polling."""
 

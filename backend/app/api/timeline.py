@@ -25,6 +25,7 @@ from app.models.project import Project
 from app.models.timeline import Timeline
 from app.models.user import User
 from app.schemas.timeline import (
+    SegmentDeleteResponse,
     TimelineGenerateConflictResponse,
     TimelineGeneratePreconditionResponse,
     TimelineGenerateResponse,
@@ -532,4 +533,160 @@ async def get_timeline_status(
         project_id=project_id,
         generated=False,
         generation_status="none",
+    )
+
+
+@router.delete(
+    "/{project_id}/timeline/segments/{segment_index}",
+    response_model=SegmentDeleteResponse,
+    summary="Delete a segment from timeline",
+    description="Remove a segment from the timeline by its index. Remaining segments are re-indexed.",
+    responses={
+        404: {"description": "Timeline or segment not found"},
+    },
+)
+async def delete_segment(
+    project_id: str,
+    segment_index: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> SegmentDeleteResponse:
+    """
+    Delete a segment from the timeline.
+
+    This will:
+    - Remove the segment at the specified index
+    - Re-index all subsequent segments
+    - Recalculate timeline timings
+    - Update the EDL file and database record
+    """
+    import hashlib
+
+    # Get project with timeline
+    project = await get_project_with_relations(project_id, db, current_user)
+
+    # Check if timeline exists
+    timeline = project.timeline
+    if timeline is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "not_found",
+                "message": "Timeline not generated",
+            },
+        )
+
+    # Load current EDL
+    storage_root = get_storage_root()
+    edl_path = storage_root / timeline.edl_path
+
+    if not edl_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "internal_error",
+                "message": "EDL file not found",
+            },
+        )
+
+    try:
+        with open(edl_path, "r") as f:
+            edl_data = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "internal_error",
+                "message": "Failed to read EDL file",
+            },
+        )
+
+    segments = edl_data.get("segments", [])
+
+    # Validate segment index
+    if segment_index < 0 or segment_index >= len(segments):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "not_found",
+                "message": f"Segment index {segment_index} not found. Timeline has {len(segments)} segments.",
+            },
+        )
+
+    # Must have at least 2 segments to delete one
+    if len(segments) <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "invalid_operation",
+                "message": "Cannot delete the last segment. Timeline must have at least one segment.",
+            },
+        )
+
+    # Remove the segment
+    segments.pop(segment_index)
+
+    # Re-index and recalculate timeline timings
+    current_time_ms = 0
+    for i, seg in enumerate(segments):
+        seg["index"] = i
+        seg["timeline_in_ms"] = current_time_ms
+
+        # Calculate duration considering transitions
+        duration = seg.get("render_duration_ms", 0)
+
+        # If not the first segment and has transition, overlap with previous
+        if i > 0 and seg.get("transition_in"):
+            transition_duration = seg["transition_in"].get("duration_ms", 0)
+            # Transition overlaps, so actual timeline position accounts for this
+            current_time_ms -= transition_duration
+
+        seg["timeline_in_ms"] = current_time_ms
+        seg["timeline_out_ms"] = current_time_ms + duration
+        current_time_ms = seg["timeline_out_ms"]
+
+        # First segment shouldn't have transition_in
+        if i == 0 and seg.get("transition_in"):
+            seg["transition_in"] = None
+
+    # Calculate new total duration
+    new_total_duration = segments[-1]["timeline_out_ms"] if segments else 0
+
+    # Update EDL data
+    edl_data["segments"] = segments
+    edl_data["segment_count"] = len(segments)
+    edl_data["total_duration_ms"] = new_total_duration
+    edl_data["modified_at"] = datetime.utcnow().isoformat()
+
+    # Calculate new EDL hash
+    edl_json = json.dumps(edl_data, sort_keys=True, default=str)
+    new_edl_hash = hashlib.sha256(edl_json.encode()).hexdigest()[:16]
+
+    # Save EDL file
+    try:
+        with open(edl_path, "w") as f:
+            json.dump(edl_data, f, indent=2, default=str)
+    except IOError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "internal_error",
+                "message": "Failed to save EDL file",
+            },
+        )
+
+    # Update timeline record in database
+    timeline.segment_count = len(segments)
+    timeline.total_duration_ms = new_total_duration
+    timeline.edl_hash = new_edl_hash
+    timeline.generated_at = datetime.utcnow()
+
+    await db.commit()
+
+    return SegmentDeleteResponse(
+        success=True,
+        deleted_index=segment_index,
+        new_segment_count=len(segments),
+        new_total_duration_ms=new_total_duration,
+        new_edl_hash=new_edl_hash,
     )

@@ -6,10 +6,12 @@ This ensures that different URL paths for the same action type share limits,
 preventing bypass via parameterized URLs (e.g., /projects/abc/render vs /projects/xyz/render).
 """
 
+import json
 from typing import Callable, Optional
 
 from fastapi import HTTPException, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 from starlette.routing import Match
 
 from .redis import get_redis_connection
@@ -20,7 +22,7 @@ RATE_LIMITS: dict[str, tuple[int, int]] = {
     "upload": (10, 60),      # 10 requests per minute
     "render": (5, 300),      # 5 requests per 5 minutes
     "analyze": (10, 60),     # 10 requests per minute
-    "default": (100, 60),    # 100 requests per minute
+    "default": (500, 60),    # 500 requests per minute (allows for polling)
 }
 
 # Map route names to rate limit categories
@@ -167,15 +169,19 @@ async def rate_limit_middleware(request: Request, call_next: Callable) -> Respon
 
     if not is_allowed:
         limit, window = RATE_LIMITS.get(category, RATE_LIMITS["default"])
-        raise HTTPException(
+        # Return JSONResponse instead of raising HTTPException
+        # (HTTPException raised in BaseHTTPMiddleware doesn't get caught by FastAPI handlers)
+        return JSONResponse(
             status_code=429,
-            detail={
-                "error": "rate_limit_exceeded",
-                "message": f"Rate limit exceeded for {category}",
-                "category": category,
-                "limit": limit,
-                "window_seconds": window,
-                "retry_after_seconds": retry_after,
+            content={
+                "detail": {
+                    "error": "rate_limit_exceeded",
+                    "message": f"Rate limit exceeded for {category}",
+                    "category": category,
+                    "limit": limit,
+                    "window_seconds": window,
+                    "retry_after_seconds": retry_after,
+                }
             },
             headers={
                 "Retry-After": str(retry_after),

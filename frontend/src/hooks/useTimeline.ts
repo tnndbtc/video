@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import type { Timeline, TimelineStatus, GenerateTimelineResponse } from '../types/timeline';
+import type { Timeline, TimelineStatus, GenerateTimelineResponse, SegmentDeleteResponse } from '../types/timeline';
 import type { ProjectSettings } from '../types';
 
 /**
@@ -71,6 +71,24 @@ export function useUpdateSettings(projectId: string) {
     onSuccess: () => {
       // Invalidate project and timeline status (settings change may make timeline stale)
       queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['project', projectId, 'timeline-status'] });
+    },
+  });
+}
+
+/**
+ * Delete a segment from the timeline
+ */
+export function useDeleteSegment(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<SegmentDeleteResponse, Error, number>({
+    mutationFn: async (segmentIndex: number) => {
+      const { data } = await api.delete(`/projects/${projectId}/timeline/segments/${segmentIndex}`);
+      return data;
+    },
+    onSuccess: () => {
+      // Invalidate timeline to refresh with new segments
+      queryClient.invalidateQueries({ queryKey: ['project', projectId, 'timeline'] });
       queryClient.invalidateQueries({ queryKey: ['project', projectId, 'timeline-status'] });
     },
   });

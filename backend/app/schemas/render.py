@@ -47,14 +47,16 @@ class RenderResponse(BaseModel):
 class RenderJobStatus(BaseModel):
     """Full status of a render job."""
 
-    id: str = Field(..., description="Render job UUID")
-    project_id: str = Field(..., description="Project UUID")
-    job_type: Literal["preview", "final"] = Field(..., description="Type of render")
-    status: Literal["queued", "running", "complete", "failed", "cancelled"] = Field(
-        ..., description="Current job status"
+    id: Optional[str] = Field(None, description="Render job UUID (null if idle)")
+    project_id: Optional[str] = Field(None, description="Project UUID (null if idle)")
+    job_type: Optional[Literal["preview", "final"]] = Field(
+        None, description="Type of render (null if idle)"
+    )
+    status: Literal["idle", "queued", "running", "complete", "failed", "cancelled"] = Field(
+        ..., description="Current job status ('idle' means no render job exists)"
     )
     progress_percent: int = Field(
-        ..., ge=0, le=100, description="Progress percentage (0-100)"
+        0, ge=0, le=100, description="Progress percentage (0-100)"
     )
     progress_message: Optional[str] = Field(
         None, description="Human-readable progress message"
@@ -66,7 +68,7 @@ class RenderJobStatus(BaseModel):
         None, description="Output file size in bytes when complete"
     )
     error: Optional[str] = Field(None, description="Error message if failed")
-    created_at: datetime = Field(..., description="When job was created")
+    created_at: Optional[datetime] = Field(None, description="When job was created")
     started_at: Optional[datetime] = Field(
         None, description="When rendering started"
     )

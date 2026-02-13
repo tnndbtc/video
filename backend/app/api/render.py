@@ -384,10 +384,87 @@ async def start_render(
 
 
 @router.get(
+    "/{project_id}/render/{render_type}/status",
+    response_model=RenderJobStatus,
+    summary="Get latest render status by type",
+    description="Get the status of the most recent render job of the specified type (preview or final). Returns status='idle' if no render job exists.",
+)
+async def get_render_status_by_type(
+    project_id: str,
+    render_type: Literal["preview", "final"],
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> RenderJobStatus:
+    """
+    Get the status of the most recent render job of the specified type.
+
+    This is useful for checking if a render is in progress or getting
+    the result of the last render without knowing the job ID.
+
+    Returns status='idle' if no render job of this type exists yet.
+
+    NOTE: This route MUST be defined before /{job_id}/status to ensure
+    'preview' and 'final' are matched as render_type, not job_id.
+    """
+    # Verify project ownership
+    await get_project_or_404(project_id, db, current_user)
+
+    # Get the most recent render job of this type (any status)
+    query = (
+        select(RenderJob)
+        .where(
+            RenderJob.project_id == project_id,
+            RenderJob.job_type == render_type,
+        )
+        .order_by(RenderJob.created_at.desc())
+        .limit(1)
+    )
+    result = await db.execute(query)
+    render_job = result.scalar_one_or_none()
+
+    if render_job is None:
+        # No render job exists yet - return idle status
+        return RenderJobStatus(
+            status="idle",
+            progress_percent=0,
+        )
+
+    # Get progress from Redis if job is running
+    progress_message = render_job.progress_message
+    progress_percent = render_job.progress_percent
+
+    if render_job.rq_job_id and render_job.status == "running":
+        progress = get_progress(render_job.rq_job_id)
+        if progress:
+            progress_percent = progress.get("percent", progress_percent)
+            progress_message = progress.get("message", progress_message)
+
+    # Build output URL if complete
+    output_url = None
+    if render_job.status == "complete" and render_job.output_path:
+        output_url = f"/api/projects/{project_id}/render/{render_job.job_type}/download"
+
+    return RenderJobStatus(
+        id=render_job.id,
+        project_id=render_job.project_id,
+        job_type=render_job.job_type,
+        status=render_job.status,
+        progress_percent=progress_percent,
+        progress_message=progress_message,
+        output_url=output_url,
+        file_size=render_job.file_size,
+        error=render_job.error_message,
+        created_at=render_job.created_at,
+        started_at=render_job.started_at,
+        completed_at=render_job.completed_at,
+    )
+
+
+@router.get(
     "/{project_id}/render/{job_id}/status",
     response_model=RenderJobStatus,
-    summary="Get render job status",
-    description="Get the current status of a render job.",
+    summary="Get render job status by ID",
+    description="Get the current status of a specific render job by its ID.",
     responses={
         404: {"model": RenderNotFoundResponse, "description": "Render job not found"},
     },
@@ -533,85 +610,4 @@ async def download_render(
         media_type="video/mp4",
         filename=filename,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@router.get(
-    "/{project_id}/render/{render_type}/status",
-    response_model=RenderJobStatus,
-    summary="Get latest render status by type",
-    description="Get the status of the most recent render job of the specified type.",
-    responses={
-        404: {"model": RenderNotFoundResponse, "description": "No render job found"},
-    },
-)
-async def get_render_status_by_type(
-    project_id: str,
-    render_type: Literal["preview", "final"],
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-) -> RenderJobStatus:
-    """
-    Get the status of the most recent render job of the specified type.
-
-    This is useful for checking if a render is in progress or getting
-    the result of the last render without knowing the job ID.
-    """
-    # Verify project ownership
-    await get_project_or_404(project_id, db, current_user)
-
-    # Get the most recent render job of this type (any status)
-    query = (
-        select(RenderJob)
-        .where(
-            RenderJob.project_id == project_id,
-            RenderJob.job_type == render_type,
-        )
-        .order_by(RenderJob.created_at.desc())
-        .limit(1)
-    )
-    result = await db.execute(query)
-    render_job = result.scalar_one_or_none()
-
-    if render_job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error": "not_found",
-                "message": f"No {render_type} render job found",
-                "details": {
-                    "render_type": render_type,
-                    "hint": f"POST /api/projects/{project_id}/render to start a render",
-                },
-            },
-        )
-
-    # Get progress from Redis if job is running
-    progress_message = render_job.progress_message
-    progress_percent = render_job.progress_percent
-
-    if render_job.rq_job_id and render_job.status == "running":
-        progress = get_progress(render_job.rq_job_id)
-        if progress:
-            progress_percent = progress.get("percent", progress_percent)
-            progress_message = progress.get("message", progress_message)
-
-    # Build output URL if complete
-    output_url = None
-    if render_job.status == "complete" and render_job.output_path:
-        output_url = f"/api/projects/{project_id}/render/{render_job.job_type}/download"
-
-    return RenderJobStatus(
-        id=render_job.id,
-        project_id=render_job.project_id,
-        job_type=render_job.job_type,
-        status=render_job.status,
-        progress_percent=progress_percent,
-        progress_message=progress_message,
-        output_url=output_url,
-        file_size=render_job.file_size,
-        error=render_job.error_message,
-        created_at=render_job.created_at,
-        started_at=render_job.started_at,
-        completed_at=render_job.completed_at,
     )

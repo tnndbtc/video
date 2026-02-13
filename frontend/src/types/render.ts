@@ -3,7 +3,7 @@
  */
 
 export type RenderType = 'preview' | 'final';
-export type RenderStatus = 'queued' | 'running' | 'complete' | 'failed' | 'cancelled';
+export type RenderStatus = 'idle' | 'queued' | 'running' | 'complete' | 'failed' | 'cancelled';
 
 export interface RenderRequest {
   type: RenderType;
@@ -19,17 +19,17 @@ export interface RenderResponse {
 }
 
 export interface RenderJobStatus {
-  id: string;
-  project_id: string;
-  job_type: RenderType;
+  id?: string;
+  project_id?: string;
+  job_type?: RenderType;
   status: RenderStatus;
-  edl_hash: string;
+  edl_hash?: string;
   progress_percent: number;
   progress_message?: string;
   output_url?: string;
   file_size?: number;
   error?: string;
-  created_at: string;
+  created_at?: string;
   started_at?: string;
   completed_at?: string;
 }

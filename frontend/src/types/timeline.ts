@@ -64,3 +64,11 @@ export interface GenerateTimelineResponse {
   message: string;
   status: string;
 }
+
+export interface SegmentDeleteResponse {
+  success: boolean;
+  deleted_index: number;
+  new_segment_count: number;
+  new_total_duration_ms: number;
+  new_edl_hash: string;
+}

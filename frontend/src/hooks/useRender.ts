@@ -37,21 +37,15 @@ export function useRenderStatus(projectId: string, renderType: RenderType) {
   return useQuery({
     queryKey: ['project', projectId, 'render', renderType],
     queryFn: async () => {
-      try {
-        const { data } = await api.get<RenderJobStatus>(
-          `/projects/${projectId}/render/${renderType}/status`
-        );
-        return data;
-      } catch (error) {
-        // Return null for 404 (no render exists yet) - this is expected
-        const axiosError = error as { response?: { status: number } };
-        if (axiosError.response?.status === 404) {
-          return null;
-        }
-        throw error;
+      const { data } = await api.get<RenderJobStatus>(
+        `/projects/${projectId}/render/${renderType}/status`
+      );
+      // Return null for 'idle' status (no render exists yet)
+      if (data.status === 'idle') {
+        return null;
       }
+      return data;
     },
-    retry: false, // Don't retry errors
     refetchInterval: (query) => {
       // Poll while queued or running
       const data = query.state.data;
