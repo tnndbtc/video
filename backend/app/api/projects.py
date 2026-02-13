@@ -112,9 +112,16 @@ def media_asset_to_summary(asset: MediaAsset) -> MediaAssetSummary:
 
     return MediaAssetSummary(
         id=asset.id,
-        filename=asset.original_filename,
+        filename=asset.filename,
+        original_filename=asset.original_filename,
         media_type=asset.media_type,
-        processing_status="ready",  # MediaAsset always ready if in DB with dimensions
+        processing_status=asset.processing_status,
+        processing_error=asset.processing_error,
+        width=asset.width,
+        height=asset.height,
+        duration_ms=asset.duration_ms,
+        fps=asset.fps,
+        file_size=asset.file_size,
         thumbnail_url=thumbnail_url,
         sort_order=asset.sort_order,
     )

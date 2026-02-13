@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user, get_db
 from app.core.config import get_settings
+from app.core.queue import enqueue_job
 from app.core.storage import (
     ALLOWED_EXTENSIONS,
     ensure_project_directories,
@@ -318,6 +319,19 @@ async def upload_media(
             await db.flush()
             await db.refresh(asset)
 
+            # Enqueue media processing job
+            try:
+                enqueue_job(
+                    "thumbnails",
+                    "app.tasks.media.process_media",
+                    asset.id,  # media_asset_id is the only arg the worker function needs
+                    job_id=f"media_{asset.id}",
+                )
+            except Exception:
+                # Job enqueueing failed, but the file is uploaded
+                # Processing can be triggered manually later
+                pass
+
             uploaded.append(MediaUploadItem(
                 id=asset.id,
                 filename=asset.original_filename,
@@ -396,7 +410,7 @@ async def get_media(
 @router.get(
     "/media/{media_id}/thumbnail",
     summary="Get media thumbnail",
-    description="Get the thumbnail image for a media asset.",
+    description="Get the thumbnail image for a media asset. Public endpoint (no auth required).",
     responses={
         200: {"content": {"image/jpeg": {}}},
         404: {"description": "Thumbnail not found or not yet generated"},
@@ -405,15 +419,27 @@ async def get_media(
 async def get_media_thumbnail(
     media_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
 ) -> FileResponse:
     """
     Get the thumbnail for a media asset.
 
     Returns a JPEG image (256x256) if available.
     Returns 404 if processing not yet complete or failed.
+
+    Note: This endpoint is public to allow direct <img src> usage.
+    Thumbnails are low-resolution and not considered sensitive.
     """
-    media = await get_media_or_404(media_id, db, current_user)
+    # Direct query without auth check - thumbnails are public
+    result = await db.execute(
+        select(MediaAsset).where(MediaAsset.id == media_id)
+    )
+    media = result.scalar_one_or_none()
+
+    if media is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "not_found", "message": "Media asset not found"},
+        )
 
     if not media.thumbnail_path:
         raise HTTPException(

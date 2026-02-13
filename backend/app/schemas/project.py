@@ -139,8 +139,15 @@ class MediaAssetSummary(BaseModel):
 
     id: str
     filename: str
+    original_filename: str
     media_type: str
-    processing_status: str = "ready"  # Placeholder until processing_status is added to model
+    processing_status: str = "ready"
+    processing_error: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    duration_ms: Optional[int] = None
+    fps: Optional[float] = None
+    file_size: int
     thumbnail_url: Optional[str] = None
     sort_order: int
 
