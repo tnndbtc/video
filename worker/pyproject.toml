@@ -1,0 +1,61 @@
+[tool.poetry]
+name = "beatstitch-worker"
+version = "0.1.0"
+description = "BeatStitch Video Editor Worker - Beat Analysis & Rendering"
+authors = ["BeatStitch Team"]
+readme = "README.md"
+packages = [{include = "app"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# Job queue
+rq = "^1.15.1"
+redis = "^5.0.1"
+
+# Beat detection
+madmom = "^0.16.1"
+librosa = "^0.10.1"
+
+# Audio/Video processing
+numpy = "^1.26.3"
+scipy = "^1.12.0"
+soundfile = "^0.12.1"
+ffmpeg-python = "^0.2.0"
+
+# Image processing
+Pillow = "^10.2.0"
+
+# Database access (shared with backend for job results)
+sqlalchemy = "^2.0.25"
+aiosqlite = "^0.19.0"
+
+# Utilities
+pydantic = "^2.5.3"
+pydantic-settings = "^2.1.0"
+python-dotenv = "^1.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.4"
+black = "^24.1.0"
+ruff = "^0.1.13"
+mypy = "^1.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true

@@ -1,0 +1,133 @@
+You are Claude Code acting as a senior full-stack engineer and software architect.
+
+PROJECT GOAL
+Design a self-hosted web application (runs on Linux servers in my lab) that helps me create videos by stitching together local images and videos, optionally synced to an audio track’s beats (e.g., switch every 4 or 8 beats). This is NOT an AI generation product. It is a deterministic editing + rendering system. If I need generated visuals, I will use external tools (Runway / Veo) and then import the results.
+
+PRIMARY DELIVERABLE
+Produce an architecture design document for the MVP and an expansion plan. The design must include:
+- component diagram (textual is fine)
+- tech stack recommendation
+- project folder layout
+- data models / schemas (project JSON / EDL)
+- key API endpoints
+- beat detection approach
+- rendering approach (ffmpeg strategy)
+- preview strategy (fast preview vs final render)
+- job queue / async rendering approach
+- deployment approach (single server first, multi-server later)
+- security considerations (auth, file access, resource limits)
+- observability (logs, metrics)
+- risks and mitigations
+
+ENVIRONMENT / CONSTRAINTS
+- Backend runs on Linux, no GPU required.
+- I have multiple servers, but MVP can run on one.
+- All media files are local to the server (uploaded via browser).
+- Budget: avoid paid AI tokens. Use open-source tooling.
+- Use ffmpeg for final rendering.
+- Beat detection should be DSP-based (no AI), using madmom or librosa.
+- The app should support both images and videos:
+  - Images can be animated with Ken Burns style pan/zoom.
+  - Videos can be trimmed to fit segment durations.
+- The user wants “most of the work done” like iMovie:
+  - import media
+  - choose “cut every N beats”
+  - choose transitions
+  - auto-generate timeline
+  - preview
+  - export
+
+MVP FEATURES (MUST HAVE)
+1) Web UI
+   - Login (simple local auth ok)
+   - Project list (create/open)
+   - Upload media (images/videos) + upload audio track
+   - Media bin (thumbnails, duration)
+   - Basic timeline view (ordered list is fine for MVP)
+   - Controls:
+     - beats_per_cut (e.g., 4/8)
+     - transition type (cut/crossfade)
+     - transition duration
+     - image animation toggle (Ken Burns)
+     - output resolution (1080p default)
+   - “Auto Build Timeline” button
+   - “Render Preview” button (low-res quick)
+   - “Render Final” button (full res)
+   - “Download MP4” button
+
+2) Backend
+   - Store projects and metadata (SQLite is fine for MVP)
+   - Store uploaded files on disk with safe paths
+   - Beat analysis service:
+     - detect BPM + beat timestamps + downbeats if possible
+     - expose beats to UI (markers)
+   - Timeline generator:
+     - builds an Edit Decision List (EDL) based on beats_per_cut and media order
+     - handles images vs videos:
+       - images become segments of duration = N beats
+       - videos trimmed or split to duration = N beats (or multiple segments)
+   - Render service:
+     - generate ffmpeg filtergraph commands to:
+       - scale/pad to output size
+       - apply ken burns to images (zoompan)
+       - trim video segments (trim/setpts)
+       - transitions (xfade) when enabled
+       - concatenate segments
+       - add audio track (atrim, asetpts, amix if needed)
+     - run rendering as background jobs (queue)
+     - job status endpoints (progress polling)
+   - Error handling:
+     - handle weird codecs, missing audio, incompatible aspect ratios
+     - provide user-visible errors
+
+3) Limits
+   - Cap at 50 media items per project for MVP
+   - Timeouts and resource limits (prevent runaway ffmpeg)
+
+NICE TO HAVE (PHASE 2)
+- Drag-and-drop reorder timeline
+- Snap clips to beat grid
+- Section rules (intro slower, chorus faster)
+- Per-clip override duration / effect
+- Templates/presets
+- Multi-user support
+
+OUTPUT REQUIRED FROM YOU (Claude Code)
+A) Architecture design doc with sections:
+   1. Overview / user workflow
+   2. Component architecture (frontend/backend/worker/storage)
+   3. Data model (Project, MediaAsset, BeatGrid, Timeline/EDL, RenderJob)
+   4. API endpoints with request/response examples
+   5. Beat detection plan (library choice, performance, caching)
+   6. Timeline generation algorithm (pseudocode)
+   7. Rendering strategy with ffmpeg approach (example filtergraph snippets)
+   8. Preview strategy (proxy render, lower res, faster preset)
+   9. Job system (queue choice: Redis+RQ/Celery vs simple sqlite queue; recommend one)
+   10. Deployment plan (docker compose recommended)
+   11. Security + file safety (path traversal prevention, auth, rate limits)
+   12. Observability (structured logs, metrics)
+   13. Risks + mitigations + testing plan
+   14. Roadmap for Phase 2
+
+B) Concrete recommended tech stack (choose one):
+   - Frontend: React (Next.js) OR simple React SPA
+   - Backend API: FastAPI (Python)
+   - Worker: Python worker process
+   - Storage: SQLite for metadata + filesystem for media
+   - Queue: choose minimal viable (e.g., Redis + RQ)
+   - Audio analysis: madmom (preferred) with librosa fallback
+   - Rendering: ffmpeg CLI
+
+C) Provide a proposed repository structure:
+   - /frontend
+   - /backend
+   - /worker
+   - /scripts
+   - docker-compose.yml
+   - etc.
+
+IMPORTANT NOTES
+- Keep the design practical and implementable quickly.
+- Avoid over-engineering. MVP should be achievable in ~2 weeks by one developer with AI coding help.
+- Assume the UI “editor” is simple for MVP (not a full NLE).
+- Provide specific details, not generic advice.

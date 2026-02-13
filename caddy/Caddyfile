@@ -1,0 +1,62 @@
+# Caddy configuration for BeatStitch production
+# {$DOMAIN} is substituted from environment variable, defaults to localhost
+
+{$DOMAIN:localhost} {
+    # Enable compression for API responses
+    encode gzip
+
+    # Logging
+    log {
+        output stdout
+        format console
+    }
+
+    # Health check endpoint for Caddy itself
+    handle /caddy-health {
+        respond "OK" 200
+    }
+
+    # API proxy - route /api/* to backend
+    handle /api/* {
+        reverse_proxy backend:8000 {
+            # Health checking
+            health_uri /health
+            health_interval 30s
+            health_timeout 10s
+
+            # Timeouts for long-running operations (video processing)
+            transport http {
+                read_timeout 600s
+                write_timeout 600s
+            }
+
+            # Headers
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Root health check proxy
+    handle /health {
+        reverse_proxy backend:8000
+    }
+
+    # Frontend static files / SPA
+    handle {
+        reverse_proxy frontend:3000 {
+            # WebSocket support for Vite HMR (dev) or general WS
+            transport http {
+                read_timeout 300s
+            }
+
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up Upgrade {http.request.header.Upgrade}
+            header_up Connection {http.request.header.Connection}
+        }
+    }
+}

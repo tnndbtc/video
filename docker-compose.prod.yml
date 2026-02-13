@@ -1,0 +1,232 @@
+# BeatStitch Production Docker Compose Configuration
+#
+# Usage:
+#   1. Copy .env.example to .env and configure values
+#   2. Build: docker-compose -f docker-compose.prod.yml build
+#   3. Start: docker-compose -f docker-compose.prod.yml up -d
+#   4. View logs: docker-compose -f docker-compose.prod.yml logs -f
+#
+# This configuration includes:
+#   - Caddy reverse proxy with automatic HTTPS
+#   - Production-optimized frontend (nginx serving static build)
+#   - Backend API with health checks
+#   - Worker service for video processing
+#   - Redis for job queue
+#   - Named volumes for persistence
+#   - Resource limits
+#   - Proper restart policies
+
+version: "3.8"
+
+services:
+  # ===========================================================================
+  # Caddy Reverse Proxy
+  # ===========================================================================
+  # Handles SSL termination, routes requests to frontend/backend
+  caddy:
+    image: caddy:2-alpine
+    container_name: beatstitch-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/caddy-health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.1"
+          memory: 32M
+    networks:
+      - beatstitch-network
+
+  # ===========================================================================
+  # Frontend (Production Build)
+  # ===========================================================================
+  # Nginx serving static Vite build
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        - VITE_API_URL=${VITE_API_URL:-/api}
+    container_name: beatstitch-frontend
+    # No ports exposed - accessed through Caddy
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/nginx-health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.1"
+          memory: 32M
+    networks:
+      - beatstitch-network
+
+  # ===========================================================================
+  # Backend API
+  # ===========================================================================
+  # FastAPI application serving the REST API
+  backend:
+    build:
+      context: ./backend
+    container_name: beatstitch-backend
+    # No ports exposed - accessed through Caddy
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////data/db/beatstitch.db}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - SECRET_KEY=${SECRET_KEY}
+      - STORAGE_PATH=${STORAGE_PATH:-/data}
+      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-524288000}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost,https://localhost}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - beatstitch_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    networks:
+      - beatstitch-network
+
+  # ===========================================================================
+  # Worker Service
+  # ===========================================================================
+  # RQ worker for background video processing jobs
+  worker:
+    build:
+      context: ./worker
+    container_name: beatstitch-worker
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////data/db/beatstitch.db}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - STORAGE_PATH=${STORAGE_PATH:-/data}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - beatstitch_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    # Worker doesn't have HTTP endpoint, use process check
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "python"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G  # FFmpeg video processing needs more memory
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    networks:
+      - beatstitch-network
+
+  # ===========================================================================
+  # Redis
+  # ===========================================================================
+  # Job queue and caching
+  redis:
+    image: redis:7-alpine
+    container_name: beatstitch-redis
+    # No ports exposed externally - only accessible within network
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    networks:
+      - beatstitch-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  # Application data: uploads, derived files, outputs, database
+  beatstitch_data:
+    name: beatstitch_data
+    driver: local
+
+  # Redis persistence
+  redis_data:
+    name: beatstitch_redis_data
+    driver: local
+
+  # Caddy SSL certificates and data
+  caddy_data:
+    name: beatstitch_caddy_data
+    driver: local
+
+  # Caddy configuration
+  caddy_config:
+    name: beatstitch_caddy_config
+    driver: local
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  beatstitch-network:
+    name: beatstitch-network
+    driver: bridge

@@ -1,0 +1,65 @@
+version: "3.8"
+
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "3001:3000"  # External port 3001 -> internal 3000
+    environment:
+      # For production: set to actual domain or use relative paths
+      # Do NOT hardcode localhost for production deployments
+      - VITE_API_URL=${API_URL:-}
+    depends_on:
+      - backend
+    volumes:
+      # Development: hot reload
+      - ./frontend/src:/app/src:ro
+      - ./frontend/public:/app/public:ro
+
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8000"  # External port 8080 -> internal 8000
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/db/beatstitch.db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - STORAGE_PATH=/data
+      - MAX_UPLOAD_SIZE=524288000
+    volumes:
+      - beatstitch-data:/data
+    depends_on:
+      - redis
+    # mem_limit works in Compose v2 (not Swarm)
+    # Uncomment if needed: mem_limit: 2g
+
+  worker:
+    build: ./worker
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/db/beatstitch.db
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_PATH=/data
+    volumes:
+      - beatstitch-data:/data
+    depends_on:
+      - redis
+      - backend
+    # Memory limits in standard Compose (not Swarm):
+    # mem_limit: 4g
+    #
+    # NOTE: Job timeouts are the PRIMARY protection against
+    # runaway FFmpeg processes. Memory limits are secondary.
+
+  redis:
+    image: redis:7-alpine
+    # Port not exposed externally - containers communicate via internal network
+    # Uncomment if you need external Redis access:
+    # ports:
+    #   - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+
+volumes:
+  beatstitch-data:
+  redis-data:

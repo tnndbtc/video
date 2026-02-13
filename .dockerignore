@@ -1,0 +1,72 @@
+# Git
+.git
+.gitignore
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.*.local
+*.env
+
+# IDE and editor files
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+ENV
+env
+.pytest_cache
+.coverage
+htmlcov
+.mypy_cache
+.ruff_cache
+
+# Node
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Build outputs (we build inside container)
+dist
+build
+*.egg-info
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Tests (optional - include if you want to run tests in container)
+# tests
+# *_test.py
+# test_*.py
+
+# Backups
+backups
+
+# Local development
+docker-compose.override.yml
+*.local
+
+# Logs
+*.log
+logs
+
+# Temporary files
+tmp
+temp
+*.tmp
