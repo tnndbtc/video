@@ -14,6 +14,7 @@ import uuid
 
 import aiofiles
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -354,6 +355,74 @@ async def upload_audio(
         file_size=audio_track.file_size,
         analysis_status=audio_track.analysis_status,
         analysis_job_id=job_id,
+    )
+
+
+@router.get(
+    "/{project_id}/audio/stream",
+    summary="Stream audio file",
+    description="Get the audio file for playback. Public endpoint (no auth required).",
+    responses={
+        200: {"content": {"audio/mpeg": {}}},
+        404: {"description": "Audio not found"},
+    },
+)
+async def stream_audio(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    """
+    Stream the audio file for playback.
+
+    Returns the audio file for HTML5 audio element playback.
+    This endpoint is public to allow direct <audio src> usage.
+    """
+    # Verify project exists
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "not_found", "message": "Project not found"},
+        )
+
+    # Get audio track
+    result = await db.execute(
+        select(AudioTrack).where(AudioTrack.project_id == project_id)
+    )
+    audio = result.scalar_one_or_none()
+    if audio is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "not_found", "message": "No audio track for this project"},
+        )
+
+    # Resolve audio path
+    audio_path = Path(get_storage_root()) / audio.file_path
+    if not audio_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "not_found", "message": "Audio file not found on disk"},
+        )
+
+    # Determine media type from file extension
+    ext = audio_path.suffix.lower()
+    media_types = {
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".flac": "audio/flac",
+        ".aac": "audio/aac",
+        ".ogg": "audio/ogg",
+        ".m4a": "audio/mp4",
+    }
+    media_type = media_types.get(ext, "audio/mpeg")
+
+    return FileResponse(
+        path=str(audio_path),
+        media_type=media_type,
+        filename=audio.original_filename,
     )
 
 

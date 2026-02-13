@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import { useUploadAudio, useBeatsStatus } from '../hooks/useMedia';
 import { AudioStatus } from './ProcessingStatus';
 import type { AudioTrack } from '../types/media';
+import { API_BASE_URL } from '../config';
 
 interface AudioUploaderProps {
   projectId: string;
@@ -41,6 +42,40 @@ function MusicIcon({ className = '' }: { className?: string }) {
   );
 }
 
+function PlayIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+    >
+      <path
+        fillRule="evenodd"
+        d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+function PauseIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+    >
+      <path
+        fillRule="evenodd"
+        d="M6.75 5.25a.75.75 0 01.75-.75H9a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H7.5a.75.75 0 01-.75-.75V5.25zm7.5 0A.75.75 0 0115 4.5h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H15a.75.75 0 01-.75-.75V5.25z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
@@ -51,7 +86,9 @@ function formatDuration(ms: number): string {
 export function AudioUploader({ projectId, currentAudio }: AudioUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const dragCounterRef = useRef(0);
 
   const { mutate: uploadAudio, isPending: isUploading } = useUploadAudio(projectId);
@@ -133,14 +170,49 @@ export function AudioUploader({ projectId, currentAudio }: AudioUploaderProps) {
     fileInputRef.current?.click();
   }, []);
 
+  const togglePlayPause = useCallback(() => {
+    if (!audioRef.current) return;
+
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play();
+    }
+    setIsPlaying(!isPlaying);
+  }, [isPlaying]);
+
+  const handleAudioEnded = useCallback(() => {
+    setIsPlaying(false);
+  }, []);
+
   // Show current audio info if exists
   if (currentAudio) {
+    const audioUrl = `${API_BASE_URL}/projects/${projectId}/audio/stream`;
+
     return (
       <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+        {/* Hidden audio element */}
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          onEnded={handleAudioEnded}
+          onPause={() => setIsPlaying(false)}
+          onPlay={() => setIsPlaying(true)}
+        />
+
         <div className="flex items-start gap-4">
-          <div className="flex-shrink-0 w-12 h-12 bg-gray-700 rounded-lg flex items-center justify-center">
-            <MusicIcon className="w-6 h-6 text-blue-400" />
-          </div>
+          {/* Play/Pause button */}
+          <button
+            onClick={togglePlayPause}
+            className="flex-shrink-0 w-12 h-12 bg-blue-600 hover:bg-blue-500 rounded-lg flex items-center justify-center transition-colors"
+            title={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? (
+              <PauseIcon className="w-6 h-6 text-white" />
+            ) : (
+              <PlayIcon className="w-6 h-6 text-white" />
+            )}
+          </button>
           <div className="flex-1 min-w-0">
             <h4 className="text-white font-medium truncate" title={currentAudio.filename}>
               {currentAudio.filename}
