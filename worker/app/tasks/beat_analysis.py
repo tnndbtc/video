@@ -357,7 +357,7 @@ def analyze_beats(project_id: str, audio_id: str) -> dict:
     class AudioTrack(Base):
         __tablename__ = "audio_tracks"
         id = Column(String(36), primary_key=True)
-        project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+        project_id = Column(String(36), nullable=False)  # FK to projects.id
         filename = Column(String(255), nullable=False)
         original_filename = Column(String(255), nullable=False)
         file_path = Column(String(500), nullable=False)

@@ -164,13 +164,13 @@ export function MediaCard({ asset, onDelete }: MediaCardProps) {
           </span>
         </div>
 
-        {/* Delete button */}
+        {/* Delete button - always visible */}
         {onDelete && (
           <button
             onClick={handleDelete}
             disabled={isDeleting}
-            className="absolute top-2 right-2 p-1.5 bg-red-600 hover:bg-red-500 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
-            title="Delete"
+            className="absolute top-2 right-2 p-1.5 bg-red-600/80 hover:bg-red-500 text-white rounded transition-colors disabled:opacity-50 shadow-lg"
+            title="Delete media"
           >
             <TrashIcon className="w-4 h-4" />
           </button>

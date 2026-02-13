@@ -106,6 +106,7 @@ class TimelineStatusResponse(BaseModel):
     """Lightweight timeline status response for polling."""
 
     project_id: str = Field(..., description="Project UUID")
+    generated: bool = Field(False, description="Whether a timeline has been generated")
     generation_status: Literal["none", "queued", "generating", "ready", "failed"] = Field(
         ..., description="Current generation status"
     )

@@ -33,7 +33,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
-    ForeignKey,
+    # ForeignKey not needed - just reading from existing DB
     Integer,
     String,
     Text,
@@ -105,7 +105,7 @@ class MediaAsset(Base):
     __tablename__ = "media_assets"
 
     id = Column(String(36), primary_key=True)
-    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+    project_id = Column(String(36), nullable=False)  # FK to projects.id
     filename = Column(String(255), nullable=False)
     original_filename = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
@@ -133,7 +133,7 @@ class AudioTrack(Base):
     __tablename__ = "audio_tracks"
 
     id = Column(String(36), primary_key=True)
-    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+    project_id = Column(String(36), nullable=False)  # FK to projects.id
     filename = Column(String(255), nullable=False)
     original_filename = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
@@ -155,7 +155,7 @@ class Project(Base):
     __tablename__ = "projects"
 
     id = Column(String(36), primary_key=True)
-    owner_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    owner_id = Column(String(36), nullable=False)  # FK to users.id
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     beats_per_cut = Column(Integer, default=4, nullable=False)
@@ -177,7 +177,7 @@ class Timeline(Base):
     __tablename__ = "timelines"
 
     id = Column(String(36), primary_key=True)
-    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+    project_id = Column(String(36), nullable=False)  # FK to projects.id
     edl_path = Column(String(500), nullable=False)
     total_duration_ms = Column(Integer, nullable=False, default=0)
     segment_count = Column(Integer, nullable=False, default=0)

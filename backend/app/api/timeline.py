@@ -130,13 +130,10 @@ async def get_project_with_relations(
     return project
 
 
-def placeholder_timeline_generation(project_id: str) -> None:
-    """
-    Placeholder function for timeline generation job.
-
-    This will be replaced by the actual timeline generation worker task.
-    """
-    pass
+# The actual timeline generation task is in the worker service:
+# worker/app/tasks/timeline.py::generate_timeline
+# We pass the function path as a string to RQ
+TIMELINE_GENERATION_TASK = "app.tasks.timeline.generate_timeline"
 
 
 def load_edl_segments(edl_path: str) -> List[Dict[str, Any]]:
@@ -289,7 +286,7 @@ async def generate_timeline(
     try:
         enqueue_timeline_generation(
             project_id=project_id,
-            func=placeholder_timeline_generation,
+            func=TIMELINE_GENERATION_TASK,
             job_id=job_id,
         )
     except Exception as e:
@@ -437,6 +434,7 @@ async def get_timeline_status(
             if status_value == "queued":
                 return TimelineStatusResponse(
                     project_id=project_id,
+                    generated=True,
                     generation_status="queued",
                     generation_job_id=job_id,
                     # Include existing timeline info
@@ -450,6 +448,7 @@ async def get_timeline_status(
                 progress_percent = progress.get("percent", 0) if progress else None
                 return TimelineStatusResponse(
                     project_id=project_id,
+                    generated=True,
                     generation_status="generating",
                     generation_job_id=job_id,
                     progress_percent=progress_percent,
@@ -463,6 +462,7 @@ async def get_timeline_status(
                 error_msg = job_status.get("error", "Timeline generation failed")
                 return TimelineStatusResponse(
                     project_id=project_id,
+                    generated=True,
                     generation_status="failed",
                     generation_job_id=job_id,
                     error_message=error_msg,
@@ -486,6 +486,7 @@ async def get_timeline_status(
 
         return TimelineStatusResponse(
             project_id=project_id,
+            generated=True,
             generation_status="ready",
             edl_hash=timeline.edl_hash,
             segment_count=timeline.segment_count,
@@ -502,6 +503,7 @@ async def get_timeline_status(
         if status_value == "queued":
             return TimelineStatusResponse(
                 project_id=project_id,
+                generated=False,
                 generation_status="queued",
                 generation_job_id=job_id,
             )
@@ -510,6 +512,7 @@ async def get_timeline_status(
             progress_percent = progress.get("percent", 0) if progress else None
             return TimelineStatusResponse(
                 project_id=project_id,
+                generated=False,
                 generation_status="generating",
                 generation_job_id=job_id,
                 progress_percent=progress_percent,
@@ -518,6 +521,7 @@ async def get_timeline_status(
             error_msg = job_status.get("error", "Timeline generation failed")
             return TimelineStatusResponse(
                 project_id=project_id,
+                generated=False,
                 generation_status="failed",
                 generation_job_id=job_id,
                 error_message=error_msg,
@@ -526,5 +530,6 @@ async def get_timeline_status(
     # Case 3: No timeline and no active job
     return TimelineStatusResponse(
         project_id=project_id,
+        generated=False,
         generation_status="none",
     )

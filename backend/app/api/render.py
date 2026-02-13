@@ -205,17 +205,10 @@ def get_render_settings_snapshot(project: Project) -> str:
     return json.dumps(settings)
 
 
-def placeholder_render_job(
-    project_id: str,
-    job_type: str,
-    edl_hash: str,
-) -> None:
-    """
-    Placeholder function for render job.
-
-    This will be replaced by the actual render worker task.
-    """
-    pass
+# The actual render task is in the worker service:
+# worker/app/tasks/render.py::render_video
+# We pass the function path as a string to RQ
+RENDER_VIDEO_TASK = "app.tasks.render.render_video"
 
 
 # =============================================================================
@@ -351,14 +344,14 @@ async def start_render(
             rq_job = enqueue_render_preview(
                 project_id=project_id,
                 edl_hash=request.edl_hash,
-                func=placeholder_render_job,
+                func=RENDER_VIDEO_TASK,
                 job_id=f"render_preview_{render_job.id}",
             )
         else:  # final
             rq_job = enqueue_render_final(
                 project_id=project_id,
                 edl_hash=request.edl_hash,
-                func=placeholder_render_job,
+                func=RENDER_VIDEO_TASK,
                 job_id=f"render_final_{render_job.id}",
             )
 

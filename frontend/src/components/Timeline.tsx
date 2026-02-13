@@ -251,7 +251,7 @@ export function Timeline({ projectId: _projectId, timeline, onRegenerate }: Time
             >
               {segments.map((segment, index) => (
                 <TimelineSegment
-                  key={segment.media_asset_id}
+                  key={`${segment.media_asset_id}-${index}`}
                   segment={segment}
                   pixelsPerMs={pixelsPerMs}
                   showTransition={index > 0}

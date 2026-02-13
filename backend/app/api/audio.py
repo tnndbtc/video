@@ -163,13 +163,10 @@ def get_audio_sample_rate(file_path: str) -> Optional[int]:
     return None
 
 
-def placeholder_beat_analysis(project_id: str, audio_id: str) -> None:
-    """
-    Placeholder function for beat analysis job.
-
-    This will be replaced by the actual beat analysis worker task.
-    """
-    pass
+# The actual beat analysis task is in the worker service:
+# worker/app/tasks/beat_analysis.py::analyze_beats
+# We pass the function path as a string to RQ
+BEAT_ANALYSIS_TASK = "app.tasks.beat_analysis.analyze_beats"
 
 
 # =============================================================================
@@ -339,7 +336,7 @@ async def upload_audio(
         enqueue_beat_analysis(
             project_id=project_id,
             audio_id=audio_id,
-            func=placeholder_beat_analysis,
+            func=BEAT_ANALYSIS_TASK,
             job_id=job_id,
         )
     except Exception:
@@ -483,7 +480,7 @@ async def analyze_audio(
         enqueue_beat_analysis(
             project_id=project_id,
             audio_id=audio.id,
-            func=placeholder_beat_analysis,
+            func=BEAT_ANALYSIS_TASK,
             job_id=job_id,
         )
     except Exception as e:

@@ -1,8 +1,12 @@
 import { useParams, Link } from 'react-router-dom';
 import { useProject, useProjectMedia, useDeleteMedia, useReorderMedia } from '../hooks/useMedia';
+import { useTimeline, useTimelineStatus, useGenerateTimeline } from '../hooks/useTimeline';
 import { MediaUploader } from '../components/MediaUploader';
 import { MediaGrid } from '../components/MediaGrid';
 import { AudioUploader } from '../components/AudioUploader';
+import { Timeline } from '../components/Timeline';
+import { TimelineControls } from '../components/TimelineControls';
+import { RenderPanel } from '../components/RenderPanel';
 
 function ArrowLeftIcon({ className = '' }: { className?: string }) {
   return (
@@ -93,6 +97,11 @@ export function Editor() {
   const { mutate: deleteMedia } = useDeleteMedia(projectId || '');
   const { mutate: reorderMedia } = useReorderMedia(projectId || '');
 
+  // Timeline hooks
+  const { data: timeline } = useTimeline(projectId || '');
+  const { data: timelineStatus } = useTimelineStatus(projectId || '');
+  const { mutate: generateTimeline, isPending: isGenerating } = useGenerateTimeline(projectId || '');
+
   if (!projectId) {
     return <ErrorDisplay message="No project ID provided" />;
   }
@@ -115,6 +124,10 @@ export function Editor() {
 
   const handleReorderMedia = (newOrder: string[]) => {
     reorderMedia(newOrder);
+  };
+
+  const handleGenerateTimeline = () => {
+    generateTimeline();
   };
 
   return (
@@ -173,6 +186,17 @@ export function Editor() {
                 onReorder={handleReorderMedia}
               />
             </section>
+
+            {/* Timeline Visualization */}
+            {timeline && (
+              <section>
+                <Timeline
+                  projectId={projectId}
+                  timeline={timeline}
+                  onRegenerate={handleGenerateTimeline}
+                />
+              </section>
+            )}
           </div>
         </div>
 
@@ -203,46 +227,30 @@ export function Editor() {
               </section>
             )}
 
-            {/* Placeholder sections for future features */}
-            <div className="border-t border-gray-700 pt-6 space-y-4">
-              <div className="bg-gray-700/30 rounded-lg p-4 text-center">
-                <svg
-                  className="w-8 h-8 text-gray-600 mx-auto mb-2"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"
-                  />
-                </svg>
-                <p className="text-sm text-gray-500">Timeline</p>
-                <p className="text-xs text-gray-600">Coming in S17</p>
-              </div>
+            {/* Timeline Section */}
+            {project.audio_track && project.audio_track.analysis_status === 'complete' && timelineStatus && (
+              <section className="border-t border-gray-700 pt-6">
+                <h2 className="text-lg font-medium text-white mb-3">Timeline</h2>
+                <TimelineControls
+                  projectId={projectId}
+                  status={timelineStatus}
+                  onGenerate={handleGenerateTimeline}
+                  isGenerating={isGenerating}
+                />
+              </section>
+            )}
 
-              <div className="bg-gray-700/30 rounded-lg p-4 text-center">
-                <svg
-                  className="w-8 h-8 text-gray-600 mx-auto mb-2"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"
-                  />
-                </svg>
-                <p className="text-sm text-gray-500">Render</p>
-                <p className="text-xs text-gray-600">Coming in S18</p>
-              </div>
-            </div>
+            {/* Render Section */}
+            {timelineStatus?.generated && (
+              <section className="border-t border-gray-700 pt-6">
+                <h2 className="text-lg font-medium text-white mb-3">Export</h2>
+                <RenderPanel
+                  projectId={projectId}
+                  edlHash={timelineStatus.edl_hash || null}
+                  hasTimeline={timelineStatus.generated}
+                />
+              </section>
+            )}
           </div>
         </div>
       </div>
