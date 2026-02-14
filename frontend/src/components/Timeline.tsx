@@ -12,6 +12,7 @@ export interface TimelineProps {
   previewSegments?: PreviewSegment[] | null;
   bpm?: number;
   beatsPerCut?: number;
+  onDeleteMedia?: (mediaId: string) => void;
 }
 
 // Zoom levels in pixels per millisecond
@@ -170,19 +171,39 @@ function PreviewSegmentView({
   pixelsPerMs,
   index,
   isLast,
+  onDelete,
 }: {
   segment: PreviewSegment;
   pixelsPerMs: number;
   index: number;
   isLast: boolean;
+  onDelete?: (mediaId: string) => void;
 }) {
   const width = Math.max(segment.duration_ms * pixelsPerMs, 40);
 
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onDelete) {
+      onDelete(segment.media_id);
+    }
+  };
+
   return (
     <div
-      className="relative flex-shrink-0 group"
+      className="relative flex-shrink-0 h-[80px]"
       style={{ width: `${width}px` }}
     >
+      {/* Delete button */}
+      <button
+        onClick={handleDelete}
+        className="absolute -top-2 -right-2 z-50 p-1 rounded-full bg-red-600 text-white hover:bg-red-700 shadow-lg border-2 border-white"
+        title="Remove from timeline"
+      >
+        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+
       <div
         className={`relative h-full rounded-lg border-2 ${
           isLast ? 'border-purple-500 bg-gradient-to-b from-purple-900/50 to-purple-950/80' : 'border-blue-500 bg-gradient-to-b from-blue-900/50 to-blue-950/80'
@@ -208,8 +229,8 @@ function PreviewSegmentView({
           </span>
         </div>
 
-        {/* Duration badge */}
-        <div className="absolute top-1 right-1 z-10">
+        {/* Duration badge - moved to bottom right when delete button is present */}
+        <div className={`absolute ${onDelete ? 'bottom-1 right-1' : 'top-1 right-1'} z-10`}>
           <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-black/70 text-white">
             {(segment.duration_ms / 1000).toFixed(1)}s
           </span>
@@ -225,7 +246,7 @@ function PreviewSegmentView({
         )}
 
         {/* Hover tooltip */}
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80 transition-opacity pointer-events-none opacity-0 hover:opacity-100">
           <div className="text-center text-xs text-white p-2">
             <div className="font-medium mb-1">Preview {index + 1}</div>
             <div className="text-gray-300">
@@ -251,7 +272,7 @@ function PreviewSegmentView({
  * Displays timeline segments for preview - editing happens via media reordering.
  * Supports both rendered timeline and client-side preview segments.
  */
-export function Timeline({ timeline, previewSegments, bpm, beatsPerCut: propBeatsPerCut }: TimelineProps) {
+export function Timeline({ timeline, previewSegments, bpm, beatsPerCut: propBeatsPerCut, onDeleteMedia }: TimelineProps) {
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const pixelsPerMs = ZOOM_LEVELS[zoomIndex];
@@ -355,17 +376,16 @@ export function Timeline({ timeline, previewSegments, bpm, beatsPerCut: propBeat
       {/* Scrollable timeline area */}
       <div
         ref={scrollContainerRef}
-        className="overflow-x-auto overflow-y-hidden"
-        style={{ maxHeight: '200px' }}
+        className="overflow-x-auto overflow-y-visible"
       >
         <div style={{ minWidth: `${Math.max(timelineWidth, 100)}px` }}>
           {/* Time ruler */}
           <TimeRuler totalDuration={total_duration_ms} pixelsPerMs={pixelsPerMs} />
 
           {/* Segments track */}
-          <div className="relative bg-gray-800 min-h-[120px] py-2 px-2">
+          <div className="relative bg-gray-800 min-h-[100px] pt-5 pb-2 px-3">
             <div
-              className="flex items-center gap-1 h-[100px]"
+              className="flex items-start gap-3 h-[80px]"
               style={{ width: `${timelineWidth}px` }}
             >
               {isRenderedMode ? (
@@ -387,6 +407,7 @@ export function Timeline({ timeline, previewSegments, bpm, beatsPerCut: propBeat
                     pixelsPerMs={pixelsPerMs}
                     index={index}
                     isLast={index === previewSegments!.length - 1}
+                    onDelete={onDeleteMedia}
                   />
                 ))
               )}

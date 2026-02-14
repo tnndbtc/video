@@ -1,7 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useProject, useProjectMedia, useDeleteMedia, useReorderMedia } from '../hooks/useMedia';
-import { useTimeline } from '../hooks/useTimeline';
 import { MediaUploader } from '../components/MediaUploader';
 import { MediaGrid } from '../components/MediaGrid';
 import { AudioUploader } from '../components/AudioUploader';
@@ -99,9 +98,6 @@ export function Editor() {
   const { mutate: deleteMedia } = useDeleteMedia(projectId || '');
   const { mutate: reorderMedia } = useReorderMedia(projectId || '');
 
-  // Timeline hook (read-only preview)
-  const { data: timeline } = useTimeline(projectId || '');
-
   // Video length state (in seconds, default 20)
   // Store as string to allow empty input while typing
   const [videoLengthInput, setVideoLengthInput] = useState('20');
@@ -111,13 +107,36 @@ export function Editor() {
   // Beat rule state (moved from RenderPanel)
   const [ruleText, setRuleText] = useState('');
 
+  // Timeline media IDs - ordered list of media added to timeline (starts empty)
+  const [timelineMediaIds, setTimelineMediaIds] = useState<string[]>([]);
+
   // Parse rule text for live preview
   const parsedRule = useMemo(() => parseRuleText(ruleText), [ruleText]);
 
+  // Get full media objects for timeline (in order)
+  const timelineMedia = useMemo(() => {
+    return timelineMediaIds
+      .map(id => media.find(m => m.id === id))
+      .filter((m): m is NonNullable<typeof m> => m != null);
+  }, [media, timelineMediaIds]);
+
+  // Add media to timeline (drag from library)
+  const handleAddToTimeline = useCallback((mediaId: string) => {
+    setTimelineMediaIds(prev => {
+      if (prev.includes(mediaId)) return prev; // Don't add duplicates
+      return [...prev, mediaId];
+    });
+  }, []);
+
+  // Remove media from timeline (does NOT delete from library)
+  const handleRemoveFromTimeline = useCallback((mediaId: string) => {
+    setTimelineMediaIds(prev => prev.filter(id => id !== mediaId));
+  }, []);
+
   // Calculate preview segments based on beat rule, video length, and audio BPM
   const previewSegments = useMemo((): PreviewSegment[] | null => {
-    // Need media to calculate preview
-    if (!media.length) {
+    // Timeline starts empty - user must drag media to add
+    if (!timelineMedia.length) {
       return null;
     }
 
@@ -134,16 +153,16 @@ export function Editor() {
     let currentTimeMs = 0;
     let mediaIndex = 0;
 
-    while (currentTimeMs < videoDurationMs && mediaIndex < media.length) {
-      const isLast = mediaIndex === media.length - 1;
+    while (currentTimeMs < videoDurationMs && mediaIndex < timelineMedia.length) {
+      const isLast = mediaIndex === timelineMedia.length - 1;
       // Last item extends to fill remaining video duration
       const duration = isLast
         ? videoDurationMs - currentTimeMs
         : segmentDurationMs;
 
       segments.push({
-        media_id: media[mediaIndex].id,
-        thumbnail_url: media[mediaIndex].thumbnail_url,
+        media_id: timelineMedia[mediaIndex].id,
+        thumbnail_url: timelineMedia[mediaIndex].thumbnail_url,
         duration_ms: duration,
         timeline_in_ms: currentTimeMs,
         timeline_out_ms: currentTimeMs + duration,
@@ -154,7 +173,7 @@ export function Editor() {
     }
 
     return segments;
-  }, [project?.audio_track, media, parsedRule.beatsPerCut, videoLengthSeconds]);
+  }, [project?.audio_track, timelineMedia, parsedRule.beatsPerCut, videoLengthSeconds]);
 
   if (!projectId) {
     return <ErrorDisplay message="No project ID provided" />;
@@ -239,52 +258,72 @@ export function Editor() {
 
             {/* Timeline Visualization */}
             <section>
-              <h2 className="text-lg font-medium text-white mb-3">Timeline Preview</h2>
-              {timeline || previewSegments ? (
-                <Timeline
-                  timeline={timeline ?? null}
-                  previewSegments={previewSegments}
-                  bpm={project.audio_track?.bpm ?? 120}
-                  beatsPerCut={parsedRule.beatsPerCut}
-                />
-              ) : (
-                <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-                  {media.length === 0 ? (
-                    <p className="text-gray-400 text-center">
-                      Upload images and videos above to see them in the timeline.
+              <h2 className="text-lg font-medium text-white mb-3">
+                Timeline Preview
+                {timelineMediaIds.length > 0 && (
+                  <span className="ml-2 text-sm text-gray-500">
+                    ({timelineMediaIds.length} item{timelineMediaIds.length !== 1 ? 's' : ''})
+                  </span>
+                )}
+              </h2>
+              {/* Drop zone wrapper - always accepts drops */}
+              <div
+                className="relative border-2 border-dashed border-transparent hover:border-gray-600 transition-colors"
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.classList.add('border-blue-500', 'bg-blue-900/20');
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                }}
+                onDragLeave={(e) => {
+                  e.currentTarget.classList.remove('border-blue-500', 'bg-blue-900/20');
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.classList.remove('border-blue-500', 'bg-blue-900/20');
+                  const mediaId = e.dataTransfer.getData('text/plain');
+                  if (mediaId) {
+                    handleAddToTimeline(mediaId);
+                  }
+                }}
+              >
+                {previewSegments && previewSegments.length > 0 ? (
+                  <>
+                    <Timeline
+                      timeline={null}
+                      previewSegments={previewSegments}
+                      bpm={project.audio_track?.bpm ?? 120}
+                      beatsPerCut={parsedRule.beatsPerCut}
+                      onDeleteMedia={handleRemoveFromTimeline}
+                    />
+                    <p className="text-xs text-gray-500 mt-2 text-center">
+                      Drag more media here to add • Click X to remove
                     </p>
-                  ) : (
-                    <div className="space-y-3">
-                      <p className="text-gray-400 text-sm">
-                        {media.length} media file{media.length !== 1 ? 's' : ''} ready.
+                  </>
+                ) : (
+                  <div className="bg-gray-800 rounded-lg border-2 border-dashed border-gray-600 p-8 text-center">
+                    {media.length === 0 ? (
+                      <p className="text-gray-400">
+                        Upload images and videos above, then drag them here.
                       </p>
-                      <div className="flex gap-2 overflow-x-auto pb-2">
-                        {media.map((item, index) => (
-                          <div
-                            key={item.id}
-                            className="flex-shrink-0 w-20 h-14 bg-gray-700 rounded overflow-hidden relative"
-                          >
-                            {item.thumbnail_url ? (
-                              <img
-                                src={item.thumbnail_url}
-                                alt={`Media ${index + 1}`}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-gray-500 text-xs">
-                                {index + 1}
-                              </div>
-                            )}
-                            <span className="absolute bottom-0 right-0 bg-black/70 text-white text-xs px-1">
-                              {index + 1}
-                            </span>
-                          </div>
-                        ))}
+                    ) : (
+                      <div className="space-y-2">
+                        <svg className="w-12 h-12 mx-auto text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                        </svg>
+                        <p className="text-gray-400">
+                          Drag media from library to add to timeline
+                        </p>
+                        <p className="text-gray-500 text-sm">
+                          {media.length} media file{media.length !== 1 ? 's' : ''} available
+                        </p>
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
+                    )}
+                  </div>
+                )}
+              </div>
             </section>
 
             {/* Video Length Section */}

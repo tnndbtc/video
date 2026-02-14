@@ -145,6 +145,7 @@ export function MediaCard({ asset, onDelete }: MediaCardProps) {
             alt={asset.original_filename}
             className="w-full h-full object-cover"
             onError={() => setImageError(true)}
+            draggable={false}
           />
         )}
         {!isProcessing && !thumbnailUrl && asset.media_type === 'image' && <ImagePlaceholder />}

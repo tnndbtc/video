@@ -40,8 +40,12 @@ export function MediaGrid({ projectId: _projectId, media, onReorder, onDelete }:
 
   const handleDragStart = useCallback((e: React.DragEvent<HTMLDivElement>, id: string) => {
     setDraggedId(id);
-    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.effectAllowed = 'copyMove';
     e.dataTransfer.setData('text/plain', id);
+    // Set drag image for better visual feedback
+    if (e.currentTarget) {
+      e.dataTransfer.setDragImage(e.currentTarget, 50, 50);
+    }
   }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>, id: string) => {
@@ -101,7 +105,7 @@ export function MediaGrid({ projectId: _projectId, media, onReorder, onDelete }:
       {sortedMedia.map((asset) => (
         <div
           key={asset.id}
-          draggable={!!onReorder}
+          draggable={true}
           onDragStart={(e) => handleDragStart(e, asset.id)}
           onDragOver={(e) => handleDragOver(e, asset.id)}
           onDragLeave={handleDragLeave}
