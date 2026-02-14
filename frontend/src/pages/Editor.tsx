@@ -133,6 +133,16 @@ export function Editor() {
     setTimelineMediaIds(prev => prev.filter(id => id !== mediaId));
   }, []);
 
+  // Reorder media in timeline
+  const handleReorderTimeline = useCallback((fromIndex: number, toIndex: number) => {
+    setTimelineMediaIds(prev => {
+      const newOrder = [...prev];
+      const [moved] = newOrder.splice(fromIndex, 1);
+      newOrder.splice(toIndex, 0, moved);
+      return newOrder;
+    });
+  }, []);
+
   // Calculate preview segments based on beat rule, video length, and audio BPM
   const previewSegments = useMemo((): PreviewSegment[] | null => {
     // Timeline starts empty - user must drag media to add
@@ -297,6 +307,7 @@ export function Editor() {
                       bpm={project.audio_track?.bpm ?? 120}
                       beatsPerCut={parsedRule.beatsPerCut}
                       onDeleteMedia={handleRemoveFromTimeline}
+                      onReorderMedia={handleReorderTimeline}
                     />
                     <p className="text-xs text-gray-500 mt-2 text-center">
                       Drag more media here to add • Click X to remove

@@ -13,6 +13,7 @@ export interface TimelineProps {
   bpm?: number;
   beatsPerCut?: number;
   onDeleteMedia?: (mediaId: string) => void;
+  onReorderMedia?: (fromIndex: number, toIndex: number) => void;
 }
 
 // Zoom levels in pixels per millisecond
@@ -172,12 +173,24 @@ function PreviewSegmentView({
   index,
   isLast,
   onDelete,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  isDragging,
+  isDragOver,
 }: {
   segment: PreviewSegment;
   pixelsPerMs: number;
   index: number;
   isLast: boolean;
   onDelete?: (mediaId: string) => void;
+  onDragStart?: (e: React.DragEvent, index: number) => void;
+  onDragOver?: (e: React.DragEvent, index: number) => void;
+  onDrop?: (e: React.DragEvent, index: number) => void;
+  onDragEnd?: () => void;
+  isDragging?: boolean;
+  isDragOver?: boolean;
 }) {
   const width = Math.max(segment.duration_ms * pixelsPerMs, 40);
 
@@ -190,14 +203,28 @@ function PreviewSegmentView({
 
   return (
     <div
-      className="relative flex-shrink-0 h-[80px]"
+      className={`relative flex-shrink-0 h-[80px] cursor-grab active:cursor-grabbing transition-all ${
+        isDragging ? 'opacity-50 scale-95' : ''
+      } ${isDragOver ? 'translate-x-2' : ''}`}
       style={{ width: `${width}px` }}
+      draggable={true}
+      onDragStart={(e) => onDragStart?.(e, index)}
+      onDragOver={(e) => {
+        e.preventDefault();
+        onDragOver?.(e, index);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop?.(e, index);
+      }}
+      onDragEnd={onDragEnd}
     >
       {/* Delete button */}
       <button
         onClick={handleDelete}
         className="absolute -top-2 -right-2 z-50 p-1 rounded-full bg-red-600 text-white hover:bg-red-700 shadow-lg border-2 border-white"
         title="Remove from timeline"
+        draggable={false}
       >
         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -215,6 +242,7 @@ function PreviewSegmentView({
             src={segment.thumbnail_url}
             alt={`Preview ${index + 1}`}
             className="w-full h-full object-cover"
+            draggable={false}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gray-800 text-gray-500">
@@ -272,10 +300,41 @@ function PreviewSegmentView({
  * Displays timeline segments for preview - editing happens via media reordering.
  * Supports both rendered timeline and client-side preview segments.
  */
-export function Timeline({ timeline, previewSegments, bpm, beatsPerCut: propBeatsPerCut, onDeleteMedia }: TimelineProps) {
+export function Timeline({ timeline, previewSegments, bpm, beatsPerCut: propBeatsPerCut, onDeleteMedia, onReorderMedia }: TimelineProps) {
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const pixelsPerMs = ZOOM_LEVELS[zoomIndex];
+
+  // Drag state for reordering
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  const handleSegmentDragStart = useCallback((e: React.DragEvent, index: number) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
+  }, []);
+
+  const handleSegmentDragOver = useCallback((e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex !== null && index !== draggedIndex) {
+      setDragOverIndex(index);
+    }
+  }, [draggedIndex]);
+
+  const handleSegmentDrop = useCallback((e: React.DragEvent, toIndex: number) => {
+    e.preventDefault();
+    if (draggedIndex !== null && draggedIndex !== toIndex && onReorderMedia) {
+      onReorderMedia(draggedIndex, toIndex);
+    }
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  }, [draggedIndex, onReorderMedia]);
+
+  const handleSegmentDragEnd = useCallback(() => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  }, []);
 
   const handleZoomIn = useCallback(() => {
     setZoomIndex((prev) => Math.min(prev + 1, ZOOM_LEVELS.length - 1));
@@ -408,6 +467,12 @@ export function Timeline({ timeline, previewSegments, bpm, beatsPerCut: propBeat
                     index={index}
                     isLast={index === previewSegments!.length - 1}
                     onDelete={onDeleteMedia}
+                    onDragStart={handleSegmentDragStart}
+                    onDragOver={handleSegmentDragOver}
+                    onDrop={handleSegmentDrop}
+                    onDragEnd={handleSegmentDragEnd}
+                    isDragging={draggedIndex === index}
+                    isDragOver={dragOverIndex === index}
                   />
                 ))
               )}
