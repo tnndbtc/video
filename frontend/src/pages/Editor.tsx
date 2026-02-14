@@ -103,7 +103,10 @@ export function Editor() {
   const { data: timeline } = useTimeline(projectId || '');
 
   // Video length state (in seconds, default 20)
-  const [videoLengthSeconds, setVideoLengthSeconds] = useState(20);
+  // Store as string to allow empty input while typing
+  const [videoLengthInput, setVideoLengthInput] = useState('20');
+  // Parse to number for calculations (minimum 1, default 20)
+  const videoLengthSeconds = Math.max(1, parseInt(videoLengthInput) || 20);
 
   // Beat rule state (moved from RenderPanel)
   const [ruleText, setRuleText] = useState('');
@@ -290,9 +293,10 @@ export function Editor() {
               <div className="flex items-center gap-2">
                 <input
                   type="number"
-                  value={videoLengthSeconds}
-                  onChange={(e) => setVideoLengthSeconds(Math.max(1, parseInt(e.target.value) || 1))}
+                  value={videoLengthInput}
+                  onChange={(e) => setVideoLengthInput(e.target.value)}
                   min="1"
+                  placeholder="20"
                   className="w-24 px-3 py-2 bg-gray-900 border border-gray-600 rounded-md text-white text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
                 <span className="text-gray-400 text-sm">seconds</span>
