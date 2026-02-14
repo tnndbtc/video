@@ -10,10 +10,27 @@ Provides secure file path handling with:
 
 import os
 import re
+import stat
 from pathlib import Path
 from uuid import UUID, uuid4
 
 from .config import get_settings
+
+
+def _mkdir_world_writable(path: Path) -> None:
+    """
+    Create a directory with world-writable permissions (777).
+
+    This ensures both the backend (running as root) and worker (running as uid 1000)
+    can write to the same directories.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    # Set permissions to 777 (rwxrwxrwx) - needed because backend runs as root
+    # but worker runs as non-root user
+    try:
+        os.chmod(path, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+    except OSError:
+        pass  # Ignore permission errors if we can't chmod (e.g., not owner)
 
 
 # Allowed file extensions by category
@@ -280,16 +297,16 @@ def ensure_project_directories(project_id: str) -> dict[str, Path]:
     directories = {}
     for category in VALID_CATEGORIES:
         dir_path = base_path / category
-        dir_path.mkdir(parents=True, exist_ok=True)
+        _mkdir_world_writable(dir_path)
         directories[category] = dir_path
 
     # Also create derived and output directories
     derived_path = storage_root / "derived" / project_id
-    derived_path.mkdir(parents=True, exist_ok=True)
+    _mkdir_world_writable(derived_path)
     directories["derived"] = derived_path
 
     output_path = storage_root / "outputs" / project_id
-    output_path.mkdir(parents=True, exist_ok=True)
+    _mkdir_world_writable(output_path)
     directories["outputs"] = output_path
 
     return directories

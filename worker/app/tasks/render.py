@@ -186,6 +186,28 @@ class Timeline(Base):
     modified_at = Column(DateTime, nullable=False)
 
 
+class RenderJob(Base):
+    """Local model definition for RenderJob."""
+
+    __tablename__ = "render_jobs"
+
+    id = Column(String(36), primary_key=True)
+    project_id = Column(String(36), nullable=False)
+    job_type = Column(String(10), nullable=False)  # 'preview' or 'final'
+    edl_hash = Column(String(64), nullable=False)
+    rq_job_id = Column(String(100), nullable=True)
+    status = Column(String(20), nullable=False)  # queued, running, complete, failed
+    progress_percent = Column(Integer, default=0)
+    progress_message = Column(String(200), nullable=True)
+    output_path = Column(String(500), nullable=True)
+    file_size = Column(BigInteger, nullable=True)
+    error_message = Column(Text, nullable=True)
+    render_settings_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+
 # ============================================================================
 # FFmpeg Command Builder
 # ============================================================================
@@ -374,7 +396,7 @@ class FFmpegCommandBuilder:
         Build Ken Burns (zoompan) filter for an image.
 
         Uses zoompan filter with interpolated zoom/pan values.
-        Scales input to 8000:-1 for high quality zoom.
+        Scales input to 2x output width for quality zoom (not 8000 which is too slow).
 
         Args:
             in_label: Input stream label (e.g., "[0:v]")
@@ -404,9 +426,13 @@ class FFmpegCommandBuilder:
         x_expr = f"(iw-iw/zoom)*({sx}+({ex}-{sx})*on/{duration_frames})"
         y_expr = f"(ih-ih/zoom)*({sy}+({ey}-{sy})*on/{duration_frames})"
 
+        # Scale to 2x output width for quality, not 8000 which is extremely slow
+        # For preview (640x360) -> 1280px, for final (1920x1080) -> 3840px
+        intermediate_width = w * 2
+
         return (
             f"{in_label}"
-            f"scale=8000:-1,"
+            f"scale={intermediate_width}:-1,"
             f"zoompan=z='{zoom_expr}':"
             f"x='{x_expr}':"
             f"y='{y_expr}':"
@@ -611,23 +637,21 @@ def simplify_edl_for_preview(edl: dict) -> dict:
     """
     Create simplified EDL for preview rendering.
 
-    Reduces Ken Burns zoom range for faster processing.
+    DISABLES Ken Burns entirely for fast preview renders.
+    Zoompan filter is too slow even with small input sizes.
 
     Args:
         edl: Original EDL dictionary
 
     Returns:
-        Simplified EDL copy
+        Simplified EDL copy with Ken Burns disabled
     """
     preview_edl = deepcopy(edl)
 
-    # Simplify Ken Burns (reduce zoom range)
+    # DISABLE Ken Burns entirely for preview - zoompan is too slow
     for segment in preview_edl["segments"]:
-        kb = segment.get("ken_burns")
-        if kb:
-            # Reduce zoom range for faster processing
-            kb["start_zoom"] = 1.0
-            kb["end_zoom"] = min(kb.get("end_zoom", 1.1), 1.1)
+        if "ken_burns" in segment:
+            del segment["ken_burns"]
 
     return preview_edl
 
@@ -756,6 +780,47 @@ def enqueue_render(project_id: str, job_type: str, edl_hash: str):
 # ============================================================================
 
 
+def update_render_job_status(
+    db,
+    project_id: str,
+    job_type: str,
+    status: str,
+    progress_percent: int = None,
+    progress_message: str = None,
+    output_path: str = None,
+    file_size: int = None,
+    error_message: str = None,
+    started_at: datetime = None,
+    completed_at: datetime = None,
+) -> None:
+    """Update the render_jobs table with current status."""
+    # Find the most recent render job for this project/type that's queued or running
+    render_job = db.query(RenderJob).filter(
+        RenderJob.project_id == project_id,
+        RenderJob.job_type == job_type,
+        RenderJob.status.in_(["queued", "running"]),
+    ).order_by(RenderJob.created_at.desc()).first()
+
+    if render_job:
+        render_job.status = status
+        if progress_percent is not None:
+            render_job.progress_percent = progress_percent
+        if progress_message is not None:
+            render_job.progress_message = progress_message
+        if output_path is not None:
+            render_job.output_path = output_path
+        if file_size is not None:
+            render_job.file_size = file_size
+        if error_message is not None:
+            render_job.error_message = error_message
+        if started_at is not None:
+            render_job.started_at = started_at
+        if completed_at is not None:
+            render_job.completed_at = completed_at
+        db.commit()
+        logger.debug(f"Updated render job {render_job.id} status to {status}")
+
+
 def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
     """
     RQ task to render video output from EDL.
@@ -769,7 +834,8 @@ def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
     6. Builds FFmpeg command
     7. Runs FFmpeg with timeout enforcement
     8. Updates progress via RQ job metadata
-    9. Returns output information
+    9. Updates render_jobs table with status
+    10. Returns output information
 
     Args:
         project_id: UUID of the project
@@ -789,6 +855,14 @@ def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
     update_job_progress(0, f"Starting {job_type} render")
 
     with get_db_session() as db:
+        # Mark job as running
+        update_render_job_status(
+            db, project_id, job_type,
+            status="running",
+            started_at=datetime.utcnow(),
+            progress_percent=0,
+            progress_message="Starting render",
+        )
         # Load project
         project = db.query(Project).filter_by(id=project_id).first()
         if not project:
@@ -858,7 +932,8 @@ def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
         )
         cmd = builder.build()
 
-        logger.info(f"FFmpeg command: {' '.join(cmd[:20])}...")  # Log first 20 args
+        # Log full command for debugging FFmpeg issues
+        logger.info(f"Full FFmpeg command: {' '.join(cmd)}")
 
         update_job_progress(25, "Starting FFmpeg render")
 
@@ -885,6 +960,13 @@ def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
             # Update project status to failed
             project.status = "render_failed"
             project.status_message = str(e)[:200]
+            # Update render job status to failed
+            update_render_job_status(
+                db, project_id, job_type,
+                status="failed",
+                error_message=str(e)[:500],
+                completed_at=datetime.utcnow(),
+            )
             db.commit()
             raise
 
@@ -892,14 +974,37 @@ def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
 
         # Verify output file exists and get stats
         if not output_path.exists():
+            update_render_job_status(
+                db, project_id, job_type,
+                status="failed",
+                error_message="Output file was not created",
+                completed_at=datetime.utcnow(),
+            )
             raise FFmpegError("Output file was not created")
 
         file_size = output_path.stat().st_size
         if file_size == 0:
+            update_render_job_status(
+                db, project_id, job_type,
+                status="failed",
+                error_message="Output file is empty",
+                completed_at=datetime.utcnow(),
+            )
             raise FFmpegError("Output file is empty")
 
         # Calculate relative path for storage
         relative_output_path = f"outputs/{project_id}/{job_type}/{output_filename}"
+
+        # Update render job status to complete
+        update_render_job_status(
+            db, project_id, job_type,
+            status="complete",
+            progress_percent=100,
+            progress_message="Render complete",
+            output_path=relative_output_path,
+            file_size=file_size,
+            completed_at=datetime.utcnow(),
+        )
 
         update_job_progress(100, f"{job_type.capitalize()} render complete")
 

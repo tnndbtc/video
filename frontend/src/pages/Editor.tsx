@@ -188,15 +188,53 @@ export function Editor() {
             </section>
 
             {/* Timeline Visualization */}
-            {timeline && (
-              <section>
+            <section>
+              <h2 className="text-lg font-medium text-white mb-3">Timeline Preview</h2>
+              {timeline ? (
                 <Timeline
                   projectId={projectId}
                   timeline={timeline}
-                  onRegenerate={handleGenerateTimeline}
                 />
-              </section>
-            )}
+              ) : (
+                <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                  {media.length === 0 ? (
+                    <p className="text-gray-400 text-center">
+                      Upload images and videos above to see them in the timeline.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-gray-400 text-sm">
+                        {media.length} media file{media.length !== 1 ? 's' : ''} ready.
+                        Click "Generate Timeline" to create your video sequence.
+                      </p>
+                      <div className="flex gap-2 overflow-x-auto pb-2">
+                        {media.map((item, index) => (
+                          <div
+                            key={item.id}
+                            className="flex-shrink-0 w-20 h-14 bg-gray-700 rounded overflow-hidden relative"
+                          >
+                            {item.thumbnail_url ? (
+                              <img
+                                src={item.thumbnail_url}
+                                alt={`Media ${index + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-gray-500 text-xs">
+                                {index + 1}
+                              </div>
+                            )}
+                            <span className="absolute bottom-0 right-0 bg-black/70 text-white text-xs px-1">
+                              {index + 1}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
           </div>
         </div>
 
@@ -228,29 +266,27 @@ export function Editor() {
             )}
 
             {/* Timeline Section */}
-            {project.audio_track && project.audio_track.analysis_status === 'complete' && timelineStatus && (
-              <section className="border-t border-gray-700 pt-6">
-                <h2 className="text-lg font-medium text-white mb-3">Timeline</h2>
-                <TimelineControls
-                  projectId={projectId}
-                  status={timelineStatus}
-                  onGenerate={handleGenerateTimeline}
-                  isGenerating={isGenerating}
-                />
-              </section>
-            )}
+            <section className="border-t border-gray-700 pt-6">
+              <h2 className="text-lg font-medium text-white mb-3">Timeline</h2>
+              <TimelineControls
+                projectId={projectId}
+                status={timelineStatus}
+                onGenerate={handleGenerateTimeline}
+                isGenerating={isGenerating}
+                hasAudio={!!project.audio_track}
+                audioAnalyzing={project.audio_track?.analysis_status === 'analyzing'}
+              />
+            </section>
 
             {/* Render Section */}
-            {timelineStatus?.generated && (
-              <section className="border-t border-gray-700 pt-6">
-                <h2 className="text-lg font-medium text-white mb-3">Export</h2>
-                <RenderPanel
-                  projectId={projectId}
-                  edlHash={timelineStatus.edl_hash || null}
-                  hasTimeline={timelineStatus.generated}
-                />
-              </section>
-            )}
+            <section className="border-t border-gray-700 pt-6">
+              <h2 className="text-lg font-medium text-white mb-3">Export</h2>
+              <RenderPanel
+                projectId={projectId}
+                edlHash={timelineStatus?.edl_hash || null}
+                hasTimeline={!!timelineStatus?.generated}
+              />
+            </section>
           </div>
         </div>
       </div>

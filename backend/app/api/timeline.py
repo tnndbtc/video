@@ -308,38 +308,29 @@ async def generate_timeline(
 
 @router.get(
     "/{project_id}/timeline",
-    response_model=TimelineResponse,
+    response_model=TimelineResponse | None,
     summary="Get timeline with EDL",
-    description="Get the full timeline with all segments. Only available after generation completes.",
-    responses={
-        404: {"model": TimelineNotFoundResponse, "description": "Timeline not generated"},
-    },
+    description="Get the full timeline with all segments. Returns null if not yet generated.",
 )
 async def get_timeline(
     project_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-) -> TimelineResponse:
+) -> TimelineResponse | None:
     """
     Get the full timeline with segments.
 
     Returns the complete timeline including all segment data from the EDL.
     The edl_hash is included and required for rendering operations.
+    Returns null if timeline has not been generated yet.
     """
     # Get project with timeline
     project = await get_project_with_relations(project_id, db, current_user)
 
-    # Check if timeline exists
+    # Check if timeline exists - return null instead of 404 to avoid console errors
     timeline = project.timeline
     if timeline is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error": "not_found",
-                "message": "Timeline not generated",
-                "hint": f"POST /api/projects/{project_id}/timeline/generate to create timeline",
-            },
-        )
+        return None
 
     # Load segments from EDL file
     raw_segments = load_edl_segments(timeline.edl_path)

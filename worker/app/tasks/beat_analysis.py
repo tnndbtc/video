@@ -419,6 +419,7 @@ def analyze_beats(project_id: str, audio_id: str) -> dict:
             audio_record.bpm = beat_grid.bpm
             audio_record.beat_count = beat_grid.total_beats
             audio_record.beat_grid_path = relative_beats_path
+            audio_record.duration_ms = beat_grid.duration_ms  # Save audio duration
             audio_record.analysis_status = "complete"
             audio_record.analysis_error = None
             audio_record.analyzed_at = datetime.utcnow()

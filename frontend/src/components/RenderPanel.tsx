@@ -5,7 +5,7 @@
 
 import { useCallback } from 'react';
 import { clsx } from 'clsx';
-import { useStartRender, useRenderStatus, parseRenderError } from '../hooks/useRender';
+import { useStartRender, useRenderStatus, parseRenderError, getDownloadUrl } from '../hooks/useRender';
 import { RenderButton } from './RenderButton';
 import { RenderProgress } from './RenderProgress';
 import { RenderResult } from './RenderResult';
@@ -41,6 +41,7 @@ function RenderSection({
   const startRender = useStartRender(projectId);
 
   const isPreview = renderType === 'preview';
+  const isIdle = status?.status === 'idle';
   const isRendering = status?.status === 'queued' || status?.status === 'running';
   const isComplete = status?.status === 'complete';
   const isFailed = status?.status === 'failed';
@@ -79,6 +80,32 @@ function RenderSection({
     startRender.mutate({ type: renderType, edlHash });
   }, [edlHash, startRender, renderType]);
 
+  // Handle download via fetch+blob (works over HTTP)
+  const handleDownload = useCallback(async () => {
+    const url = getDownloadUrl(projectId, renderType);
+    const token = localStorage.getItem('token');
+    try {
+      const response = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `${renderType}_render.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error('Download failed:', err);
+      alert('Download failed: ' + err);
+    }
+  }, [projectId, renderType]);
+
   // Parse mutation error
   const mutationError = startRender.error
     ? parseRenderError(startRender.error)
@@ -115,7 +142,7 @@ function RenderSection({
         {mutationError && (
           <div className="text-sm text-red-400 bg-red-900/20 rounded-lg p-3 border border-red-500/30">
             {mutationError.isEdlMismatch && (
-              <span>Timeline has changed. Please regenerate timeline first.</span>
+              <span>EDL hash mismatch - timeline was updated. Try again.</span>
             )}
             {mutationError.isTimelineNotReady && (
               <span>Timeline is not ready. Generate timeline first.</span>
@@ -129,8 +156,8 @@ function RenderSection({
           </div>
         )}
 
-        {/* Loading state */}
-        {isLoadingStatus && !status && (
+        {/* Loading state - only show spinner during initial fetch when we have no data at all */}
+        {isLoadingStatus && status === undefined && (
           <div className="flex items-center justify-center py-4 text-gray-400">
             <svg
               className="animate-spin h-5 w-5 mr-2"
@@ -156,8 +183,8 @@ function RenderSection({
           </div>
         )}
 
-        {/* Render button - show when idle or no previous render */}
-        {(!status || status.status === 'cancelled' || (isComplete && hasTimelineChanged)) && !isRendering && (
+        {/* Render button - show when idle, cancelled, or timeline changed */}
+        {(isIdle || status?.status === 'cancelled' || (isComplete && hasTimelineChanged)) && !isRendering && (
           <RenderButton
             label={isPreview ? 'Render Preview' : 'Render Final'}
             onClick={handleRender}
@@ -195,11 +222,14 @@ function RenderSection({
           />
         )}
 
-        {/* Timeline changed warning */}
-        {hasTimelineChanged && !isRendering && isComplete && (
-          <div className="flex items-center gap-2 text-sm text-yellow-400 bg-yellow-900/20 rounded-lg p-3 border border-yellow-500/30">
+        {/* Timeline changed - still show download since media exists */}
+        {hasTimelineChanged && !isRendering && isComplete && status && (
+          <button
+            onClick={handleDownload}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white font-bold rounded-lg transition-all duration-200 shadow-lg shadow-green-900/30 text-lg cursor-pointer"
+          >
             <svg
-              className="h-5 w-5 flex-shrink-0"
+              className="h-5 w-5"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -208,11 +238,11 @@ function RenderSection({
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
               />
             </svg>
-            <span>Timeline has changed. Re-render to see latest changes.</span>
-          </div>
+            Download
+          </button>
         )}
 
         {/* No render status available (404 - no render yet) */}

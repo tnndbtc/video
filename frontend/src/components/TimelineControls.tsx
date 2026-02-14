@@ -7,9 +7,11 @@ import { formatDuration } from '../utils/formatTime';
 
 export interface TimelineControlsProps {
   projectId: string;
-  status: TimelineStatus;
+  status: TimelineStatus | null | undefined;
   onGenerate: () => void;
   isGenerating: boolean;
+  hasAudio?: boolean;
+  audioAnalyzing?: boolean;
 }
 
 function Spinner({ className = '' }: { className?: string }) {
@@ -58,13 +60,23 @@ export function TimelineControls({
   status,
   onGenerate,
   isGenerating,
+  hasAudio = true,
+  audioAnalyzing = false,
 }: TimelineControlsProps) {
-  const isProcessing = status.generation_status === 'queued' || status.generation_status === 'generating';
-  const hasTimeline = status.generated && status.generation_status === 'ready';
-  const hasFailed = status.generation_status === 'failed';
+  const isProcessing = status?.generation_status === 'queued' || status?.generation_status === 'generating';
+  const hasTimeline = status?.generated && status?.generation_status === 'ready';
+  const hasFailed = status?.generation_status === 'failed';
 
-  const buttonLabel = hasTimeline ? 'Regenerate Timeline' : 'Generate Timeline';
-  const buttonDisabled = isGenerating || isProcessing;
+  // Determine button state
+  const canGenerate = hasAudio && !audioAnalyzing;
+  const buttonDisabled = !canGenerate || isGenerating || isProcessing;
+
+  let buttonLabel = hasTimeline ? 'Regenerate Timeline' : 'Generate Timeline';
+  if (!hasAudio) {
+    buttonLabel = 'Upload Audio First';
+  } else if (audioAnalyzing) {
+    buttonLabel = 'Analyzing Audio...';
+  }
 
   return (
     <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
@@ -83,7 +95,12 @@ export function TimelineControls({
           {isProcessing || isGenerating ? (
             <>
               <Spinner className="h-4 w-4" />
-              {status.generation_status === 'queued' ? 'Queued...' : 'Generating...'}
+              {status?.generation_status === 'queued' ? 'Queued...' : 'Generating...'}
+            </>
+          ) : audioAnalyzing ? (
+            <>
+              <Spinner className="h-4 w-4" />
+              {buttonLabel}
             </>
           ) : (
             <>
@@ -95,7 +112,7 @@ export function TimelineControls({
       </div>
 
       {/* Progress Indicator */}
-      {isProcessing && typeof status.progress_percent === 'number' && (
+      {isProcessing && typeof status?.progress_percent === 'number' && (
         <div className="mb-4">
           <div className="flex justify-between text-xs text-gray-400 mb-1">
             <span>Progress</span>
@@ -111,7 +128,7 @@ export function TimelineControls({
       )}
 
       {/* Error Message */}
-      {hasFailed && status.error_message && (
+      {hasFailed && status?.error_message && (
         <div className="mb-4 p-3 bg-red-900/30 border border-red-600 rounded-lg">
           <div className="flex items-start gap-2">
             <svg className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -126,7 +143,7 @@ export function TimelineControls({
       )}
 
       {/* Stale Warning */}
-      {status.stale && (
+      {status?.stale && (
         <div className="mb-4 p-3 bg-yellow-900/30 border border-yellow-600 rounded-lg">
           <div className="flex items-start gap-2">
             <svg className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -143,7 +160,7 @@ export function TimelineControls({
       )}
 
       {/* Timeline Info */}
-      {hasTimeline && (
+      {hasTimeline && status && (
         <div className="grid grid-cols-2 gap-3 pt-3 border-t border-gray-700">
           <div>
             <p className="text-xs text-gray-500 mb-0.5">Segments</p>

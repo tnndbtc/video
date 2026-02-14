@@ -13,6 +13,7 @@ This is the primary protection against runaway FFmpeg processes.
 import logging
 import os
 import re
+import select
 import signal
 import subprocess
 import time
@@ -95,6 +96,7 @@ def run_ffmpeg_with_progress(
     start_time = time.time()
     last_percent = 0
     last_progress_time = start_time
+    stall_warned = False  # Debounce flag for stall warning
 
     try:
         # Read progress from stdout line by line
@@ -128,9 +130,22 @@ def run_ffmpeg_with_progress(
                     last_progress_time = time.time()
                     progress_callback(percent, f"Rendering: {percent}%")
 
-            # Check for stall (no progress for 60 seconds)
+            # Check for stall (no progress for 60 seconds) - log only once per stall
             if time.time() - last_progress_time > 60:
-                logger.warning("FFmpeg appears stalled (no progress for 60s)")
+                if not stall_warned:
+                    logger.warning("FFmpeg appears stalled (no progress for 60s)")
+                    # Try to capture any stderr output for debugging
+                    try:
+                        readable, _, _ = select.select([process.stderr], [], [], 0)
+                        if readable:
+                            stderr_data = process.stderr.read(4096)
+                            if stderr_data:
+                                logger.warning(f"FFmpeg stderr during stall: {stderr_data[:1000]}")
+                    except Exception as e:
+                        logger.debug(f"Could not read stderr: {e}")
+                    stall_warned = True
+            else:
+                stall_warned = False  # Reset if progress resumes
 
         # Wait for process to complete with a brief timeout
         # This handles the case where we've read all stdout but process hasn't exited

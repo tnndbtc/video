@@ -7,14 +7,13 @@ import type { ProjectSettings } from '../types';
  * Fetch the full timeline with segments for a project
  */
 export function useTimeline(projectId: string) {
-  return useQuery<Timeline>({
+  return useQuery<Timeline | null>({
     queryKey: ['project', projectId, 'timeline'],
     queryFn: async () => {
       const { data } = await api.get(`/projects/${projectId}/timeline`);
-      return data;
+      return data;  // Returns null when no timeline exists
     },
     enabled: !!projectId,
-    retry: false, // Don't retry 404s when timeline doesn't exist
   });
 }
 

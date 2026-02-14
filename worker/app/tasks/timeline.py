@@ -3,13 +3,14 @@ Timeline Generation Task for BeatStitch Worker
 
 Generates the Edit Decision List (EDL) for a project by:
 1. Loading media assets sorted by sort_order
-2. Loading beat grid from /data/derived/{project_id}/beats.json
-3. Snapping media segments to beat grid based on beats_per_cut setting
-4. Calculating Ken Burns effect parameters for images
-5. Assigning transitions between segments
-6. Writing edl.json to /data/derived/{project_id}/edl.json
-7. Computing edl_hash for race condition prevention
-8. Updating Timeline record in database
+2. Using natural media durations (images: default 4s, videos: full duration)
+3. Calculating Ken Burns effect parameters for images
+4. Assigning transitions between segments
+5. Writing edl.json to /data/derived/{project_id}/edl.json
+6. Computing edl_hash for race condition prevention
+7. Updating Timeline record in database
+
+No auto-duplication - each media asset appears exactly once in user's order.
 
 Job timeout: 1 minute
 """
@@ -20,10 +21,10 @@ import logging
 import os
 import uuid
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from rq import get_current_job
 from sqlalchemy import (
@@ -32,7 +33,6 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
-    # ForeignKey not needed - just reading from existing DB
     Integer,
     String,
     Text,
@@ -46,8 +46,8 @@ logger = logging.getLogger(__name__)
 # Storage root from environment
 STORAGE_ROOT = Path(os.environ.get("STORAGE_PATH", "/data"))
 
-# Job timeout for timeline generation (1 minute)
-TIMELINE_GENERATION_TIMEOUT = 60
+# Job timeout for timeline generation (5 minutes)
+TIMELINE_GENERATION_TIMEOUT = 300
 
 # Ken Burns effect pan directions (cycle through these)
 PAN_DIRECTIONS = [
@@ -92,28 +92,6 @@ class MediaAsset(Base):
     thumbnail_path = Column(String(500), nullable=True)
     proxy_path = Column(String(500), nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
-    created_at = Column(DateTime, nullable=False)
-
-
-class AudioTrack(Base):
-    """Local model definition for AudioTrack."""
-
-    __tablename__ = "audio_tracks"
-
-    id = Column(String(36), primary_key=True)
-    project_id = Column(String(36), nullable=False)  # FK to projects.id
-    filename = Column(String(255), nullable=False)
-    original_filename = Column(String(255), nullable=False)
-    file_path = Column(String(500), nullable=False)
-    file_size = Column(BigInteger, nullable=False)
-    duration_ms = Column(Integer, nullable=False)
-    sample_rate = Column(Integer, nullable=True)
-    bpm = Column(Float, nullable=True)
-    beat_count = Column(Integer, nullable=True)
-    beat_grid_path = Column(String(500), nullable=True)
-    analysis_status = Column(String(20), default="pending", nullable=False)
-    analysis_error = Column(String(500), nullable=True)
-    analyzed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False)
 
 
@@ -199,19 +177,20 @@ class EDLSegment:
 
 class TimelineBuilder:
     """
-    Builds the Edit Decision List (EDL) from media assets and beat grid.
+    Builds the Edit Decision List (EDL) from media assets.
 
-    The timeline is built by stepping through beat indices, NOT by snapping
-    arbitrary times to beats. This ensures no gaps or overlaps.
+    Simple sequential timeline: each media asset appears exactly once
+    in the order specified by sort_order. No beat-syncing or duplication.
     """
+
+    # Default duration for images (milliseconds)
+    DEFAULT_IMAGE_DURATION_MS = 4000  # 4 seconds
 
     def __init__(
         self,
         project_id: str,
         media_assets: List[MediaAsset],
-        beat_grid: dict,
         project_settings: dict,
-        audio_duration_ms: int,
     ):
         """
         Initialize the timeline builder.
@@ -219,18 +198,13 @@ class TimelineBuilder:
         Args:
             project_id: UUID of the project
             media_assets: List of MediaAsset records (sorted by sort_order)
-            beat_grid: Beat grid loaded from beats.json
-            project_settings: Project settings dict with beats_per_cut, transition_type, etc.
-            audio_duration_ms: Duration of the audio track in milliseconds
+            project_settings: Project settings dict with transition_type, etc.
         """
         self.project_id = project_id
         self.media_assets = sorted(media_assets, key=lambda a: a.sort_order)
-        self.beat_grid = beat_grid
         self.settings = project_settings
-        self.audio_duration_ms = audio_duration_ms
 
         # Extract settings with defaults
-        self.beats_per_cut = project_settings.get("beats_per_cut", 4)
         self.transition_type = project_settings.get("transition_type", "cut")
         self.transition_duration_ms = project_settings.get("transition_duration_ms", 500)
         self.ken_burns_enabled = project_settings.get("ken_burns_enabled", True)
@@ -242,34 +216,58 @@ class TimelineBuilder:
 
     def build(self) -> dict:
         """
-        Build the complete EDL.
+        Build timeline using natural media durations (no beat sync, no duplication).
+
+        Each media asset appears exactly once in user's order:
+        - Images: default 4 seconds
+        - Videos: full duration
 
         Returns:
             dict: Complete EDL structure ready for JSON serialization
 
         Raises:
-            ValueError: If no media assets or beats available
+            ValueError: If no media assets available
         """
         if not self.media_assets:
             raise ValueError("No media assets available for timeline generation")
 
-        # Step 1: Extract cut points from beat grid
-        cut_points = self._extract_cut_points()
+        segments = []
+        timeline_position = 0
 
-        if len(cut_points) < 2:
-            raise ValueError("Not enough beats to create timeline (need at least 2 cut points)")
+        for i, asset in enumerate(self.media_assets):
+            # Determine segment duration based on media type
+            if asset.media_type == "image":
+                duration_ms = self.DEFAULT_IMAGE_DURATION_MS
+            else:  # video
+                duration_ms = asset.duration_ms or self.DEFAULT_IMAGE_DURATION_MS
 
-        # Step 2: Build media queue
-        media_queue = self._build_media_queue(cut_points)
+            # Calculate Ken Burns effect for images
+            ken_burns = None
+            if asset.media_type == "image" and self.ken_burns_enabled:
+                ken_burns = self._calculate_ken_burns(duration_ms)
 
-        # Step 3: Build segments
-        segments = self._build_segments(cut_points, media_queue)
+            # Create segment
+            segment = EDLSegment(
+                segment_index=i,
+                media_asset_id=asset.id,
+                media_type=asset.media_type,
+                timeline_in_ms=timeline_position,
+                timeline_out_ms=timeline_position + duration_ms,
+                render_duration_ms=duration_ms,
+                source_in_ms=0,
+                source_out_ms=duration_ms,
+                ken_burns=ken_burns,
+                transition_in=None,
+                transition_out=None,
+            )
+            segments.append(segment)
+            timeline_position += duration_ms
 
-        # Step 4: Apply transition overlap adjustments
+        # Apply transition overlap adjustments if not using cuts
         if self.transition_type != "cut":
             segments = self._apply_transition_overlaps(segments)
 
-        # Step 5: Compute EDL hash
+        # Compute EDL hash
         edl_hash = self._compute_edl_hash(segments)
 
         # Build final EDL structure
@@ -280,158 +278,15 @@ class TimelineBuilder:
             "project_id": self.project_id,
             "generated_at": datetime.utcnow().isoformat() + "Z",
             "edl_hash": f"sha256:{edl_hash}",
-            "beats_per_cut": self.beats_per_cut,
             "transition_type": self.transition_type,
             "transition_duration_ms": self.transition_duration_ms,
             "ken_burns_enabled": self.ken_burns_enabled,
             "total_duration_ms": total_duration_ms,
             "segment_count": len(segments),
-            "audio": {
-                "duration_ms": self.audio_duration_ms,
-                "bpm": self.beat_grid.get("bpm", 120),
-                "sample_rate": self.beat_grid.get("sample_rate", 44100),
-            },
             "segments": [seg.to_dict() for seg in segments],
         }
 
         return edl
-
-    def _extract_cut_points(self) -> List[int]:
-        """
-        Extract cut points by stepping through beat indices.
-
-        cut_times = [beats[0], beats[N], beats[2N], ...]
-        where N = beats_per_cut
-
-        Returns:
-            List of cut point timestamps in milliseconds
-        """
-        beats = self.beat_grid.get("beats", [])
-
-        if not beats:
-            # Fallback: generate evenly spaced cuts based on BPM
-            logger.warning("No beats in beat grid, generating evenly spaced cuts")
-            bpm = self.beat_grid.get("bpm", 120)
-            beat_duration_ms = 60000 / bpm
-            segment_duration_ms = int(self.beats_per_cut * beat_duration_ms)
-            return list(range(0, self.audio_duration_ms, segment_duration_ms))
-
-        cut_points = []
-        for i in range(0, len(beats), self.beats_per_cut):
-            cut_points.append(beats[i]["time_ms"])
-
-        # Ensure we include the audio end as final cut point
-        if cut_points and cut_points[-1] < self.audio_duration_ms:
-            cut_points.append(self.audio_duration_ms)
-
-        return cut_points
-
-    def _build_media_queue(self, cut_points: List[int]) -> List[dict]:
-        """
-        Build a queue of media segments to fill the timeline.
-
-        Videos are split into multiple segments if longer than cut duration.
-
-        Args:
-            cut_points: List of cut point timestamps
-
-        Returns:
-            List of media segment dictionaries
-        """
-        queue = []
-        segment_count = len(cut_points) - 1
-
-        if segment_count == 0:
-            return queue
-
-        for asset in self.media_assets:
-            if asset.media_type == "image":
-                queue.append({
-                    "asset_id": asset.id,
-                    "media_type": "image",
-                    "source_in_ms": 0,
-                    "source_out_ms": None,  # Images have no duration
-                    "duration_ms": asset.duration_ms,
-                })
-            elif asset.media_type == "video":
-                # Split video into chunks based on average segment duration
-                avg_segment_ms = self.audio_duration_ms // max(1, segment_count)
-                current_in = 0
-                asset_duration = asset.duration_ms or 0
-
-                while current_in < asset_duration:
-                    chunk_duration = min(avg_segment_ms, asset_duration - current_in)
-                    # Use if >= 30% of target duration
-                    if chunk_duration >= avg_segment_ms * 0.3:
-                        queue.append({
-                            "asset_id": asset.id,
-                            "media_type": "video",
-                            "source_in_ms": current_in,
-                            "source_out_ms": current_in + chunk_duration,
-                            "duration_ms": chunk_duration,
-                        })
-                    current_in += chunk_duration
-
-        return queue
-
-    def _build_segments(
-        self, cut_points: List[int], media_queue: List[dict]
-    ) -> List[EDLSegment]:
-        """
-        Assign media from queue to timeline segments defined by cut points.
-
-        Args:
-            cut_points: List of cut point timestamps
-            media_queue: Queue of media segments
-
-        Returns:
-            List of EDLSegment objects
-        """
-        if not media_queue:
-            raise ValueError("No media assets available")
-
-        segments = []
-        original_queue = deepcopy(media_queue)
-        queue = deepcopy(media_queue)
-
-        for i in range(len(cut_points) - 1):
-            if not queue:
-                queue = deepcopy(original_queue)  # Loop media
-
-            media = queue.pop(0)
-            timeline_in_ms = cut_points[i]
-            timeline_out_ms = cut_points[i + 1]
-            render_duration_ms = timeline_out_ms - timeline_in_ms
-
-            # For videos, adjust source_out based on actual render duration
-            if media["media_type"] == "video":
-                source_in_ms = media["source_in_ms"]
-                source_out_ms = source_in_ms + render_duration_ms
-            else:
-                source_in_ms = 0
-                source_out_ms = render_duration_ms
-
-            # Calculate Ken Burns effect for images
-            ken_burns = None
-            if media["media_type"] == "image" and self.ken_burns_enabled:
-                ken_burns = self._calculate_ken_burns(render_duration_ms)
-
-            segment = EDLSegment(
-                segment_index=i,
-                media_asset_id=media["asset_id"],
-                media_type=media["media_type"],
-                timeline_in_ms=timeline_in_ms,
-                timeline_out_ms=timeline_out_ms,
-                render_duration_ms=render_duration_ms,
-                source_in_ms=source_in_ms,
-                source_out_ms=source_out_ms,
-                ken_burns=ken_burns,
-                transition_in=None,
-                transition_out=None,
-            )
-            segments.append(segment)
-
-        return segments
 
     def _calculate_ken_burns(self, duration_ms: int) -> dict:
         """
@@ -485,7 +340,6 @@ class TimelineBuilder:
             return segments
 
         overlap_ms = self.transition_duration_ms
-        transition_def = {"type": self.transition_type, "duration_ms": overlap_ms}
 
         for i in range(len(segments)):
             # Cap transition at 50% of segment duration
@@ -526,16 +380,12 @@ class TimelineBuilder:
         payload = {
             "project_id": self.project_id,
             "settings": {
-                "beats_per_cut": self.beats_per_cut,
                 "transition_type": self.transition_type,
                 "transition_duration_ms": self.transition_duration_ms,
                 "ken_burns_enabled": self.ken_burns_enabled,
             },
             "media_order": [s.media_asset_id for s in segments],
-            "audio_checksum": self.beat_grid.get("audio_file_checksum", ""),
-            "beats_hash": hashlib.md5(
-                json.dumps(self.beat_grid.get("beats", [])[:10]).encode()
-            ).hexdigest(),
+            "media_durations": [s.render_duration_ms for s in segments],
         }
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode()).hexdigest()
@@ -559,27 +409,6 @@ def update_job_progress(percent: int, message: str) -> None:
         job.meta["progress_percent"] = percent
         job.meta["progress_message"] = message
         job.save_meta()
-
-
-def load_beat_grid(project_id: str) -> dict:
-    """
-    Load beat grid from filesystem.
-
-    Args:
-        project_id: UUID of the project
-
-    Returns:
-        dict: Beat grid data
-
-    Raises:
-        FileNotFoundError: If beats.json doesn't exist
-    """
-    beats_path = STORAGE_ROOT / "derived" / project_id / "beats.json"
-    if not beats_path.exists():
-        raise FileNotFoundError(f"Beat grid not found: {beats_path}")
-
-    with open(beats_path, "r") as f:
-        return json.load(f)
 
 
 def save_edl(edl: dict, project_id: str) -> str:
@@ -635,8 +464,11 @@ def generate_timeline(project_id: str) -> dict:
     """
     RQ task to generate timeline (EDL) for a project.
 
-    Loads media assets and beat grid, generates EDL, writes to filesystem,
+    Loads media assets in user's sort order, generates EDL with natural
+    durations (images: 4s, videos: full duration), writes to filesystem,
     and updates Timeline database record.
+
+    No beat-syncing or duplication - each media appears exactly once.
 
     Args:
         project_id: UUID of the project
@@ -645,8 +477,7 @@ def generate_timeline(project_id: str) -> dict:
         dict with edl_path, edl_hash, segment_count, and total_duration_ms
 
     Raises:
-        ValueError: If project not found or no media/audio available
-        FileNotFoundError: If beat grid doesn't exist
+        ValueError: If project not found or no media available
     """
     logger.info(f"Starting timeline generation for project={project_id}")
     update_job_progress(0, "Starting timeline generation")
@@ -657,7 +488,7 @@ def generate_timeline(project_id: str) -> dict:
         if not project:
             raise ValueError(f"Project not found: {project_id}")
 
-        update_job_progress(10, "Loading media assets")
+        update_job_progress(20, "Loading media assets")
 
         # Load media assets (sorted by sort_order)
         media_assets = (
@@ -670,29 +501,10 @@ def generate_timeline(project_id: str) -> dict:
         if not media_assets:
             raise ValueError(f"No processed media assets found for project {project_id}")
 
-        update_job_progress(20, "Loading audio track")
-
-        # Load audio track
-        audio_track = db.query(AudioTrack).filter_by(project_id=project_id).first()
-        if not audio_track:
-            raise ValueError(f"No audio track found for project {project_id}")
-
-        if audio_track.analysis_status != "complete":
-            raise ValueError(f"Audio track analysis not complete: {audio_track.analysis_status}")
-
-        update_job_progress(30, "Loading beat grid")
-
-        # Load beat grid from filesystem
-        try:
-            beat_grid = load_beat_grid(project_id)
-        except FileNotFoundError:
-            raise ValueError(f"Beat grid not found for project {project_id}")
-
         update_job_progress(40, "Building timeline")
 
         # Extract project settings
         project_settings = {
-            "beats_per_cut": project.beats_per_cut,
             "transition_type": project.transition_type,
             "transition_duration_ms": project.transition_duration_ms,
             "ken_burns_enabled": project.ken_burns_enabled,
@@ -701,13 +513,11 @@ def generate_timeline(project_id: str) -> dict:
             "output_fps": project.output_fps,
         }
 
-        # Build timeline
+        # Build timeline with natural media durations
         builder = TimelineBuilder(
             project_id=project_id,
             media_assets=media_assets,
-            beat_grid=beat_grid,
             project_settings=project_settings,
-            audio_duration_ms=audio_track.duration_ms,
         )
 
         edl = builder.build()

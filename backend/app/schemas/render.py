@@ -55,6 +55,7 @@ class RenderJobStatus(BaseModel):
     status: Literal["idle", "queued", "running", "complete", "failed", "cancelled"] = Field(
         ..., description="Current job status ('idle' means no render job exists)"
     )
+    edl_hash: Optional[str] = Field(None, description="EDL hash of the rendered timeline")
     progress_percent: int = Field(
         0, ge=0, le=100, description="Progress percentage (0-100)"
     )

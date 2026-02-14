@@ -40,10 +40,6 @@ export function useRenderStatus(projectId: string, renderType: RenderType) {
       const { data } = await api.get<RenderJobStatus>(
         `/projects/${projectId}/render/${renderType}/status`
       );
-      // Return null for 'idle' status (no render exists yet)
-      if (data.status === 'idle') {
-        return null;
-      }
       return data;
     },
     refetchInterval: (query) => {
@@ -98,22 +94,37 @@ export interface RenderError {
  */
 export function parseRenderError(error: unknown): RenderError {
   const axiosError = error as {
-    response?: { status: number; data?: { detail?: string; message?: string } };
+    response?: {
+      status: number;
+      data?: {
+        detail?: string | { error?: string; message?: string };
+        message?: string
+      }
+    };
     message?: string;
   };
 
   const status = axiosError.response?.status || 0;
-  const message =
-    axiosError.response?.data?.detail ||
-    axiosError.response?.data?.message ||
-    axiosError.message ||
-    'An unknown error occurred';
+  const detail = axiosError.response?.data?.detail;
+
+  // Handle detail being either a string or an object with message field
+  let message: string;
+  if (typeof detail === 'string') {
+    message = detail;
+  } else if (detail && typeof detail === 'object' && 'message' in detail) {
+    message = detail.message || 'An unknown error occurred';
+  } else {
+    message = axiosError.response?.data?.message || axiosError.message || 'An unknown error occurred';
+  }
+
+  // Check error type from detail object if available
+  const errorType = typeof detail === 'object' && detail ? (detail as { error?: string }).error : '';
 
   return {
     status,
     message,
-    isEdlMismatch: status === 409 && message.toLowerCase().includes('edl'),
+    isEdlMismatch: status === 409 && (errorType === 'edl_hash_mismatch' || message.toLowerCase().includes('edl')),
     isTimelineNotReady: status === 400 && message.toLowerCase().includes('timeline'),
-    isRenderInProgress: status === 409 && message.toLowerCase().includes('progress'),
+    isRenderInProgress: status === 409 && (errorType === 'conflict' || message.toLowerCase().includes('progress')),
   };
 }
