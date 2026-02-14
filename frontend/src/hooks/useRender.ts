@@ -15,9 +15,11 @@ export function useStartRender(projectId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ type }: { type: RenderType }) => {
+    mutationFn: async ({ type, rule_text, video_length_seconds }: { type: RenderType; rule_text?: string; video_length_seconds?: number }) => {
       const { data } = await api.post<RenderResponse>(`/projects/${projectId}/render`, {
         type,
+        rule_text,
+        video_length_seconds,
       });
       return data;
     },

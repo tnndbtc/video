@@ -15,12 +15,16 @@ import type { RenderType } from '../types/render';
 export interface RenderPanelProps {
   projectId: string;
   hasMedia: boolean;
+  ruleText: string;
+  videoLengthSeconds: number;
 }
 
 interface RenderSectionProps {
   projectId: string;
   renderType: RenderType;
   hasMedia: boolean;
+  ruleText: string;
+  videoLengthSeconds: number;
 }
 
 /**
@@ -31,6 +35,8 @@ function RenderSection({
   projectId,
   renderType,
   hasMedia,
+  ruleText,
+  videoLengthSeconds,
 }: RenderSectionProps) {
   const { data: status, isLoading: isLoadingStatus, error: statusError } = useRenderStatus(
     projectId,
@@ -63,13 +69,21 @@ function RenderSection({
   // Handle render start (no edlHash needed - timeline auto-generated)
   const handleRender = useCallback(() => {
     if (disabled) return;
-    startRender.mutate({ type: renderType });
-  }, [disabled, startRender, renderType]);
+    startRender.mutate({
+      type: renderType,
+      rule_text: ruleText || undefined,
+      video_length_seconds: videoLengthSeconds,
+    });
+  }, [disabled, startRender, renderType, ruleText, videoLengthSeconds]);
 
   // Handle retry after error
   const handleRetry = useCallback(() => {
-    startRender.mutate({ type: renderType });
-  }, [startRender, renderType]);
+    startRender.mutate({
+      type: renderType,
+      rule_text: ruleText || undefined,
+      video_length_seconds: videoLengthSeconds,
+    });
+  }, [startRender, renderType, ruleText, videoLengthSeconds]);
 
   // Parse mutation error
   const mutationError = startRender.error
@@ -151,9 +165,7 @@ function RenderSection({
             label={
               isRendering
                 ? (isPreview ? 'Rendering Preview...' : 'Rendering Final...')
-                : isComplete
-                  ? (isPreview ? 'Re-render Preview' : 'Re-render Final')
-                  : (isPreview ? 'Render Preview' : 'Render Final')
+                : (isPreview ? 'Render Preview' : 'Render Final')
             }
             onClick={handleRender}
             disabled={disabled}
@@ -210,7 +222,7 @@ function RenderSection({
  * Main RenderPanel component
  * Timeline is auto-generated during render - we only need to check for media.
  */
-export function RenderPanel({ projectId, hasMedia }: RenderPanelProps) {
+export function RenderPanel({ projectId, hasMedia, ruleText, videoLengthSeconds }: RenderPanelProps) {
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-700 p-6">
       {/* Panel header */}
@@ -242,11 +254,15 @@ export function RenderPanel({ projectId, hasMedia }: RenderPanelProps) {
           projectId={projectId}
           renderType="preview"
           hasMedia={hasMedia}
+          ruleText={ruleText}
+          videoLengthSeconds={videoLengthSeconds}
         />
         <RenderSection
           projectId={projectId}
           renderType="final"
           hasMedia={hasMedia}
+          ruleText={ruleText}
+          videoLengthSeconds={videoLengthSeconds}
         />
       </div>
 

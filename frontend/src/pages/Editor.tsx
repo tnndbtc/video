@@ -1,3 +1,4 @@
+import { useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useProject, useProjectMedia, useDeleteMedia, useReorderMedia } from '../hooks/useMedia';
 import { useTimeline } from '../hooks/useTimeline';
@@ -6,6 +7,8 @@ import { MediaGrid } from '../components/MediaGrid';
 import { AudioUploader } from '../components/AudioUploader';
 import { Timeline } from '../components/Timeline';
 import { RenderPanel } from '../components/RenderPanel';
+import { parseRuleText } from '../utils/parseRuleText';
+import type { PreviewSegment } from '../types/timeline';
 
 function ArrowLeftIcon({ className = '' }: { className?: string }) {
   return (
@@ -99,6 +102,57 @@ export function Editor() {
   // Timeline hook (read-only preview)
   const { data: timeline } = useTimeline(projectId || '');
 
+  // Video length state (in seconds, default 20)
+  const [videoLengthSeconds, setVideoLengthSeconds] = useState(20);
+
+  // Beat rule state (moved from RenderPanel)
+  const [ruleText, setRuleText] = useState('');
+
+  // Parse rule text for live preview
+  const parsedRule = useMemo(() => parseRuleText(ruleText), [ruleText]);
+
+  // Calculate preview segments based on beat rule, video length, and audio BPM
+  const previewSegments = useMemo((): PreviewSegment[] | null => {
+    // Need media to calculate preview
+    if (!media.length) {
+      return null;
+    }
+
+    // Use audio BPM if available, otherwise default to 120 BPM
+    const bpm = project?.audio_track?.bpm ?? 120;
+    const videoDurationMs = videoLengthSeconds * 1000;
+    const beatsPerCut = parsedRule.beatsPerCut;
+
+    // Formula: segment_duration_ms = (beats_per_cut / BPM) * 60000
+    const segmentDurationMs = Math.floor((beatsPerCut / bpm) * 60000);
+
+    // Build preview segments
+    const segments: PreviewSegment[] = [];
+    let currentTimeMs = 0;
+    let mediaIndex = 0;
+
+    while (currentTimeMs < videoDurationMs && mediaIndex < media.length) {
+      const isLast = mediaIndex === media.length - 1;
+      // Last item extends to fill remaining video duration
+      const duration = isLast
+        ? videoDurationMs - currentTimeMs
+        : segmentDurationMs;
+
+      segments.push({
+        media_id: media[mediaIndex].id,
+        thumbnail_url: media[mediaIndex].thumbnail_url,
+        duration_ms: duration,
+        timeline_in_ms: currentTimeMs,
+        timeline_out_ms: currentTimeMs + duration,
+      });
+
+      currentTimeMs += duration;
+      mediaIndex++;
+    }
+
+    return segments;
+  }, [project?.audio_track, media, parsedRule.beatsPerCut, videoLengthSeconds]);
+
   if (!projectId) {
     return <ErrorDisplay message="No project ID provided" />;
   }
@@ -183,9 +237,12 @@ export function Editor() {
             {/* Timeline Visualization */}
             <section>
               <h2 className="text-lg font-medium text-white mb-3">Timeline Preview</h2>
-              {timeline ? (
+              {timeline || previewSegments ? (
                 <Timeline
-                  timeline={timeline}
+                  timeline={timeline ?? null}
+                  previewSegments={previewSegments}
+                  bpm={project.audio_track?.bpm ?? 120}
+                  beatsPerCut={parsedRule.beatsPerCut}
                 />
               ) : (
                 <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
@@ -197,7 +254,6 @@ export function Editor() {
                     <div className="space-y-3">
                       <p className="text-gray-400 text-sm">
                         {media.length} media file{media.length !== 1 ? 's' : ''} ready.
-                        Click "Generate Timeline" to create your video sequence.
                       </p>
                       <div className="flex gap-2 overflow-x-auto pb-2">
                         {media.map((item, index) => (
@@ -226,6 +282,51 @@ export function Editor() {
                   )}
                 </div>
               )}
+            </section>
+
+            {/* Video Length Section */}
+            <section className="mt-4">
+              <h3 className="text-sm font-medium text-gray-300 mb-2">Video Length</h3>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={videoLengthSeconds}
+                  onChange={(e) => setVideoLengthSeconds(Math.max(1, parseInt(e.target.value) || 1))}
+                  min="1"
+                  className="w-24 px-3 py-2 bg-gray-900 border border-gray-600 rounded-md text-white text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <span className="text-gray-400 text-sm">seconds</span>
+              </div>
+            </section>
+
+            {/* Beat Rule Section - under Timeline Preview */}
+            <section className="mt-4">
+              <h3 className="text-sm font-medium text-gray-300 mb-2">Beat Rule (optional)</h3>
+
+              {/* Editable input */}
+              <input
+                type="text"
+                value={ruleText}
+                onChange={(e) => setRuleText(e.target.value)}
+                placeholder="e.g., 8 beats, fast, 每4拍"
+                className="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-md text-white text-sm placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+
+              {/* Live preview of parsed rule */}
+              <div className="mt-2 flex items-center gap-2 text-sm">
+                <span className="text-gray-500">→</span>
+                <span className={parsedRule.isDefault ? 'text-gray-500' : 'text-green-400'}>
+                  {parsedRule.beatsPerCut} beats per cut
+                </span>
+                {parsedRule.isDefault && (
+                  <span className="text-gray-600 text-xs">(default)</span>
+                )}
+                {!parsedRule.isDefault && parsedRule.matchedPattern && (
+                  <span className="text-gray-600 text-xs">
+                    matched: "{parsedRule.matchedPattern}"
+                  </span>
+                )}
+              </div>
             </section>
           </div>
         </div>
@@ -263,6 +364,8 @@ export function Editor() {
               <RenderPanel
                 projectId={projectId}
                 hasMedia={media.length > 0}
+                ruleText={ruleText}
+                videoLengthSeconds={videoLengthSeconds}
               />
             </section>
           </div>

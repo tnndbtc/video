@@ -72,3 +72,15 @@ export interface SegmentDeleteResponse {
   new_total_duration_ms: number;
   new_edl_hash: string;
 }
+
+/**
+ * Preview segment for client-side beat-synced timeline preview.
+ * Used before actual render to show calculated durations based on BPM.
+ */
+export interface PreviewSegment {
+  media_id: string;
+  thumbnail_url?: string;
+  duration_ms: number;
+  timeline_in_ms: number;
+  timeline_out_ms: number;
+}

@@ -901,11 +901,43 @@ def render_video(project_id: str, job_type: str) -> dict:
             "output_fps": project.output_fps,
         }
 
+        # Load render_plan.json if exists (for beat-synced rendering)
+        render_plan = None
+        render_plan_path = STORAGE_ROOT / "derived" / project_id / "render_plan.json"
+        if render_plan_path.exists():
+            try:
+                with open(render_plan_path) as f:
+                    render_plan = json.load(f)
+                logger.info(f"Loaded render_plan: {render_plan}")
+            except Exception as e:
+                logger.warning(f"Failed to load render_plan.json: {e}")
+
+        # Build beat_config from audio track + render_plan
+        beat_config = None
+        audio_track = db.query(AudioTrack).filter_by(project_id=project_id).first()
+        if audio_track and audio_track.bpm and render_plan:
+            # Use video_length_seconds from render_plan if provided, else audio duration
+            if render_plan.get("video_length_seconds"):
+                target_duration_ms = render_plan["video_length_seconds"] * 1000
+            else:
+                target_duration_ms = audio_track.duration_ms
+
+            beat_config = {
+                "bpm": audio_track.bpm,
+                "beats_per_cut": render_plan.get("beats_per_cut", 8),
+                "audio_duration_ms": target_duration_ms,
+                "loop_media": render_plan.get("loop_media", True),
+            }
+            logger.info(f"Beat-synced mode: bpm={audio_track.bpm}, "
+                       f"beats_per_cut={beat_config['beats_per_cut']}, "
+                       f"target_duration_ms={target_duration_ms}")
+
         # Build timeline
         builder = TimelineBuilder(
             project_id=project_id,
             media_assets=media_assets,
             project_settings=project_settings,
+            beat_config=beat_config,
         )
         edl = builder.build()
 
@@ -959,8 +991,7 @@ def render_video(project_id: str, job_type: str) -> dict:
         # Phase 2: Render (15-100%)
         # =====================================================================
 
-        # Load audio track for path resolution
-        audio_track = db.query(AudioTrack).filter_by(project_id=project_id).first()
+        # Use audio track loaded earlier for path resolution
         audio_path = None
         if audio_track:
             audio_path = str(STORAGE_ROOT / audio_track.file_path)

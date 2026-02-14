@@ -3,12 +3,15 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import type { Timeline as TimelineType } from '../types/timeline';
+import type { Timeline as TimelineType, PreviewSegment } from '../types/timeline';
 import { TimelineSegment } from './TimelineSegment';
 import { formatTimelineTime, formatDuration } from '../utils/formatTime';
 
 export interface TimelineProps {
   timeline: TimelineType | null;
+  previewSegments?: PreviewSegment[] | null;
+  bpm?: number;
+  beatsPerCut?: number;
 }
 
 // Zoom levels in pixels per millisecond
@@ -118,15 +121,16 @@ function BeatMarkers({
   totalDuration,
   pixelsPerMs,
   beatsPerCut,
+  bpm,
 }: {
   totalDuration: number;
   pixelsPerMs: number;
   beatsPerCut: number;
+  bpm?: number;
 }) {
   const width = totalDuration * pixelsPerMs;
-  // Assume ~120 BPM for beat marker spacing visualization
-  // In a real implementation, this would come from the audio analysis
-  const beatIntervalMs = 500; // 120 BPM = 500ms per beat
+  // Use actual BPM if available, otherwise default to 120 BPM (500ms per beat)
+  const beatIntervalMs = bpm ? Math.floor(60000 / bpm) : 500;
   const markers: { position: number; isDownbeat: boolean }[] = [];
 
   let beatCount = 0;
@@ -158,10 +162,96 @@ function BeatMarkers({
 }
 
 /**
+ * Preview segment renderer for beat-synced timeline preview.
+ * Simplified version of TimelineSegment for preview mode.
+ */
+function PreviewSegmentView({
+  segment,
+  pixelsPerMs,
+  index,
+  isLast,
+}: {
+  segment: PreviewSegment;
+  pixelsPerMs: number;
+  index: number;
+  isLast: boolean;
+}) {
+  const width = Math.max(segment.duration_ms * pixelsPerMs, 40);
+
+  return (
+    <div
+      className="relative flex-shrink-0 group"
+      style={{ width: `${width}px` }}
+    >
+      <div
+        className={`relative h-full rounded-lg border-2 ${
+          isLast ? 'border-purple-500 bg-gradient-to-b from-purple-900/50 to-purple-950/80' : 'border-blue-500 bg-gradient-to-b from-blue-900/50 to-blue-950/80'
+        } overflow-hidden`}
+      >
+        {/* Thumbnail */}
+        {segment.thumbnail_url ? (
+          <img
+            src={segment.thumbnail_url}
+            alt={`Preview ${index + 1}`}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gray-800 text-gray-500">
+            {index + 1}
+          </div>
+        )}
+
+        {/* Index badge */}
+        <div className="absolute bottom-1 left-1 z-10">
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-black/70 text-white">
+            {index + 1}
+          </span>
+        </div>
+
+        {/* Duration badge */}
+        <div className="absolute top-1 right-1 z-10">
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-black/70 text-white">
+            {(segment.duration_ms / 1000).toFixed(1)}s
+          </span>
+        </div>
+
+        {/* Last segment indicator */}
+        {isLast && (
+          <div className="absolute top-1 left-1 z-10">
+            <span className="px-1 py-0.5 rounded text-[8px] font-medium bg-purple-500/80 text-white">
+              FILL
+            </span>
+          </div>
+        )}
+
+        {/* Hover tooltip */}
+        <div className="absolute inset-0 flex items-center justify-center bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          <div className="text-center text-xs text-white p-2">
+            <div className="font-medium mb-1">Preview {index + 1}</div>
+            <div className="text-gray-300">
+              {formatDuration(segment.duration_ms)}
+            </div>
+            <div className="text-gray-400 text-[10px] mt-1">
+              {formatDuration(segment.timeline_in_ms)} - {formatDuration(segment.timeline_out_ms)}
+            </div>
+            {isLast && (
+              <div className="text-purple-400 text-[10px] mt-1">
+                Extends to fill audio
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Read-only timeline viewer component.
  * Displays timeline segments for preview - editing happens via media reordering.
+ * Supports both rendered timeline and client-side preview segments.
  */
-export function Timeline({ timeline }: TimelineProps) {
+export function Timeline({ timeline, previewSegments, bpm, beatsPerCut: propBeatsPerCut }: TimelineProps) {
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const pixelsPerMs = ZOOM_LEVELS[zoomIndex];
@@ -194,11 +284,23 @@ export function Timeline({ timeline }: TimelineProps) {
     return () => container.removeEventListener('wheel', handleWheel);
   }, [handleZoomIn, handleZoomOut]);
 
-  if (!timeline) {
+  // Determine if we're showing preview or rendered timeline
+  // Preview mode takes priority - it reflects current settings (video length, beat rule)
+  const isPreviewMode = previewSegments && previewSegments.length > 0;
+  const isRenderedMode = !isPreviewMode && !!timeline;
+
+  // Return null if nothing to show
+  if (!isPreviewMode && !isRenderedMode) {
     return null;
   }
 
-  const { segments, total_duration_ms, settings_used } = timeline;
+  // Calculate values based on mode
+  const segments = isRenderedMode ? timeline.segments : null;
+  const total_duration_ms = isRenderedMode
+    ? timeline.total_duration_ms
+    : previewSegments![previewSegments!.length - 1].timeline_out_ms;
+  const settings_used = isRenderedMode ? timeline.settings_used : null;
+  const beatsPerCut = settings_used?.beats_per_cut ?? propBeatsPerCut ?? 4;
   const timelineWidth = total_duration_ms * pixelsPerMs;
 
   return (
@@ -206,13 +308,38 @@ export function Timeline({ timeline }: TimelineProps) {
       {/* Header with controls */}
       <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
         <div className="flex items-center gap-4">
-          <h3 className="text-sm font-medium text-white">Timeline</h3>
+          <h3 className="text-sm font-medium text-white">
+            {isPreviewMode ? 'Timeline Preview' : 'Timeline'}
+          </h3>
           <div className="flex items-center gap-2 text-xs text-gray-400">
-            <span>{segments.length} segments</span>
-            <span className="text-gray-600">|</span>
-            <span>{formatDuration(total_duration_ms)}</span>
-            <span className="text-gray-600">|</span>
-            <span>{settings_used.transition_type}</span>
+            {isPreviewMode ? (
+              <>
+                <span className="text-amber-400 flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                  </svg>
+                  Beat-synced preview
+                </span>
+                <span className="text-gray-600">|</span>
+                <span>{previewSegments!.length} segments</span>
+                <span className="text-gray-600">|</span>
+                <span>{formatDuration(total_duration_ms)}</span>
+                {bpm && (
+                  <>
+                    <span className="text-gray-600">|</span>
+                    <span>{Math.round(bpm)} BPM</span>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <span>{segments!.length} segments</span>
+                <span className="text-gray-600">|</span>
+                <span>{formatDuration(total_duration_ms)}</span>
+                <span className="text-gray-600">|</span>
+                <span>{settings_used!.transition_type}</span>
+              </>
+            )}
           </div>
         </div>
 
@@ -241,21 +368,36 @@ export function Timeline({ timeline }: TimelineProps) {
               className="flex items-center gap-1 h-[100px]"
               style={{ width: `${timelineWidth}px` }}
             >
-              {segments.map((segment, index) => (
-                <TimelineSegment
-                  key={`${segment.media_asset_id}-${index}`}
-                  segment={segment}
-                  pixelsPerMs={pixelsPerMs}
-                  showTransition={index > 0}
-                />
-              ))}
+              {isRenderedMode ? (
+                // Render actual timeline segments
+                segments!.map((segment, index) => (
+                  <TimelineSegment
+                    key={`${segment.media_asset_id}-${index}`}
+                    segment={segment}
+                    pixelsPerMs={pixelsPerMs}
+                    showTransition={index > 0}
+                  />
+                ))
+              ) : (
+                // Render preview segments
+                previewSegments!.map((segment, index) => (
+                  <PreviewSegmentView
+                    key={`${segment.media_id}-${index}`}
+                    segment={segment}
+                    pixelsPerMs={pixelsPerMs}
+                    index={index}
+                    isLast={index === previewSegments!.length - 1}
+                  />
+                ))
+              )}
             </div>
 
             {/* Beat markers */}
             <BeatMarkers
               totalDuration={total_duration_ms}
               pixelsPerMs={pixelsPerMs}
-              beatsPerCut={settings_used.beats_per_cut}
+              beatsPerCut={beatsPerCut}
+              bpm={bpm}
             />
           </div>
         </div>
@@ -264,26 +406,56 @@ export function Timeline({ timeline }: TimelineProps) {
       {/* Footer with info */}
       <div className="flex items-center justify-between px-4 py-2 bg-gray-800/50 border-t border-gray-700 text-xs text-gray-500">
         <div className="flex items-center gap-4">
-          <span>Segments: {segments.length}</span>
-          <span>Duration: {formatDuration(total_duration_ms)}</span>
-          <span>Transition: {settings_used.transition_type}</span>
-          <span>Beats/cut: {settings_used.beats_per_cut}</span>
+          {isPreviewMode ? (
+            <>
+              <span>Segments: {previewSegments!.length}</span>
+              <span>Duration: {formatDuration(total_duration_ms)}</span>
+              <span>Beats/cut: {beatsPerCut}</span>
+              {bpm && <span>BPM: {Math.round(bpm)}</span>}
+            </>
+          ) : (
+            <>
+              <span>Segments: {segments!.length}</span>
+              <span>Duration: {formatDuration(total_duration_ms)}</span>
+              <span>Transition: {settings_used!.transition_type}</span>
+              <span>Beats/cut: {settings_used!.beats_per_cut}</span>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded border-2 border-blue-500 bg-blue-900/50"></span>
-            Image
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded border-2 border-green-500 bg-green-900/50"></span>
-            Video
-          </span>
+          {isPreviewMode ? (
+            <>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded border-2 border-blue-500 bg-blue-900/50"></span>
+                Segment
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded border-2 border-purple-500 bg-purple-900/50"></span>
+                Last (fill)
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded border-2 border-blue-500 bg-blue-900/50"></span>
+                Image
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded border-2 border-green-500 bg-green-900/50"></span>
+                Video
+              </span>
+            </>
+          )}
         </div>
       </div>
 
       {/* Keyboard hint */}
       <div className="px-4 py-1 bg-gray-900 text-[10px] text-gray-600 text-center">
-        Tip: Hold Ctrl/Cmd + scroll to zoom
+        {isPreviewMode ? (
+          <span>Preview based on beat rule • Click "Render Preview" to generate video</span>
+        ) : (
+          <span>Tip: Hold Ctrl/Cmd + scroll to zoom</span>
+        )}
       </div>
     </div>
   );

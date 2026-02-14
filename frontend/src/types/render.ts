@@ -7,7 +7,7 @@ export type RenderStatus = 'idle' | 'queued' | 'running' | 'complete' | 'failed'
 
 export interface RenderRequest {
   type: RenderType;
-  edl_hash: string;
+  rule_text?: string;  // Natural language rule (e.g., '8 beats', 'fast', '每4拍')
 }
 
 export interface RenderResponse {

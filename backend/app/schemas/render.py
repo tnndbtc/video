@@ -20,6 +20,17 @@ class RenderRequest(BaseModel):
     type: Literal["preview", "final"] = Field(
         ..., description="Render type: 'preview' for quick draft, 'final' for full quality"
     )
+    rule_text: Optional[str] = Field(
+        None,
+        max_length=500,
+        description="Natural language rule for beat-synced cuts (e.g., '8 beats', 'fast', '每4拍')",
+    )
+    video_length_seconds: Optional[int] = Field(
+        None,
+        gt=0,
+        le=600,
+        description="Target video length in seconds (max 10 minutes)",
+    )
     # Note: edl_hash removed - timeline is now auto-generated during render
 
 

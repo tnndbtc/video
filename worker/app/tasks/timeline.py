@@ -179,8 +179,9 @@ class TimelineBuilder:
     """
     Builds the Edit Decision List (EDL) from media assets.
 
-    Simple sequential timeline: each media asset appears exactly once
-    in the order specified by sort_order. No beat-syncing or duplication.
+    Supports two modes:
+    1. Natural duration: each media asset appears exactly once (images: 4s, videos: full duration)
+    2. Beat-synced: media loops to fill audio duration with cuts on beat boundaries
     """
 
     # Default duration for images (milliseconds)
@@ -191,6 +192,7 @@ class TimelineBuilder:
         project_id: str,
         media_assets: List[MediaAsset],
         project_settings: dict,
+        beat_config: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize the timeline builder.
@@ -199,6 +201,11 @@ class TimelineBuilder:
             project_id: UUID of the project
             media_assets: List of MediaAsset records (sorted by sort_order)
             project_settings: Project settings dict with transition_type, etc.
+            beat_config: Optional beat configuration dict with keys:
+                - bpm: Beats per minute (float)
+                - beats_per_cut: Number of beats per media cut (int)
+                - audio_duration_ms: Total audio duration in milliseconds (int)
+                - loop_media: Whether to loop media to fill duration (bool)
         """
         self.project_id = project_id
         self.media_assets = sorted(media_assets, key=lambda a: a.sort_order)
@@ -214,13 +221,28 @@ class TimelineBuilder:
         self._kb_zoom_direction = True  # True = zoom in, False = zoom out
         self._kb_pan_index = 0
 
+        # Beat configuration
+        self.beat_config = beat_config or {}
+        self.bpm = self.beat_config.get("bpm")
+        self.beats_per_cut = self.beat_config.get("beats_per_cut")
+        self.audio_duration_ms = self.beat_config.get("audio_duration_ms")
+        self.loop_media = self.beat_config.get("loop_media", False)
+
+        # Calculate beat-based durations if configured
+        self.beat_duration_ms: Optional[int] = None
+        self.segment_duration_ms: Optional[int] = None
+
+        if self.bpm and self.bpm > 0:
+            self.beat_duration_ms = int(60000 / self.bpm)
+            if self.beats_per_cut:
+                self.segment_duration_ms = self.beat_duration_ms * self.beats_per_cut
+
     def build(self) -> dict:
         """
-        Build timeline using natural media durations (no beat sync, no duplication).
+        Build timeline - dispatches to beat-synced or natural duration mode.
 
-        Each media asset appears exactly once in user's order:
-        - Images: default 4 seconds
-        - Videos: full duration
+        Beat-synced mode: media loops to fill audio duration with cuts on beat boundaries
+        Natural mode: each media asset appears exactly once
 
         Returns:
             dict: Complete EDL structure ready for JSON serialization
@@ -231,6 +253,24 @@ class TimelineBuilder:
         if not self.media_assets:
             raise ValueError("No media assets available for timeline generation")
 
+        # Use beat-synced mode if we have all required beat configuration
+        if self.segment_duration_ms and self.audio_duration_ms and self.loop_media:
+            return self._build_beat_synced()
+
+        # Fall back to natural duration mode
+        return self._build_natural_duration()
+
+    def _build_natural_duration(self) -> dict:
+        """
+        Build timeline using natural media durations (no beat sync, no duplication).
+
+        Each media asset appears exactly once in user's order:
+        - Images: default 4 seconds
+        - Videos: full duration
+
+        Returns:
+            dict: Complete EDL structure ready for JSON serialization
+        """
         segments = []
         timeline_position = 0
 
@@ -281,6 +321,95 @@ class TimelineBuilder:
             "transition_type": self.transition_type,
             "transition_duration_ms": self.transition_duration_ms,
             "ken_burns_enabled": self.ken_burns_enabled,
+            "total_duration_ms": total_duration_ms,
+            "segment_count": len(segments),
+            "segments": [seg.to_dict() for seg in segments],
+        }
+
+        return edl
+
+    def _build_beat_synced(self) -> dict:
+        """
+        Build timeline with beat-synced media cuts.
+
+        Each media asset appears exactly once:
+        - All except last: duration = beats_per_cut * beat_duration_ms
+        - Last asset: extends to fill remaining duration (no looping)
+
+        Returns:
+            dict: Complete EDL structure ready for JSON serialization
+        """
+        segments = []
+        timeline_position = 0
+        num_assets = len(self.media_assets)
+
+        for media_index, asset in enumerate(self.media_assets):
+            # Stop if we've filled the target duration
+            if timeline_position >= self.audio_duration_ms:
+                break
+
+            is_last = media_index == num_assets - 1
+            remaining_duration = self.audio_duration_ms - timeline_position
+
+            # Last asset extends to fill remaining duration
+            # Other assets use beat-synced duration
+            if is_last:
+                duration_ms = remaining_duration
+            else:
+                duration_ms = min(self.segment_duration_ms, remaining_duration)
+
+            # Calculate source timing for videos
+            source_in_ms = 0
+            source_out_ms = duration_ms
+
+            if asset.media_type == "video" and asset.duration_ms:
+                # For videos, cap at video duration
+                source_out_ms = min(duration_ms, asset.duration_ms)
+
+            # Calculate Ken Burns effect for images
+            ken_burns = None
+            if asset.media_type == "image" and self.ken_burns_enabled:
+                ken_burns = self._calculate_ken_burns(duration_ms)
+
+            # Create segment
+            segment = EDLSegment(
+                segment_index=media_index,
+                media_asset_id=asset.id,
+                media_type=asset.media_type,
+                timeline_in_ms=timeline_position,
+                timeline_out_ms=timeline_position + duration_ms,
+                render_duration_ms=duration_ms,
+                source_in_ms=source_in_ms,
+                source_out_ms=source_out_ms,
+                ken_burns=ken_burns,
+                transition_in=None,
+                transition_out=None,
+            )
+            segments.append(segment)
+
+            timeline_position += duration_ms
+
+        # Apply transition overlap adjustments if not using cuts
+        if self.transition_type != "cut":
+            segments = self._apply_transition_overlaps(segments)
+
+        # Compute EDL hash
+        edl_hash = self._compute_edl_hash(segments)
+
+        # Build final EDL structure
+        total_duration_ms = segments[-1].timeline_out_ms if segments else 0
+
+        edl = {
+            "version": "1.0",
+            "project_id": self.project_id,
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "edl_hash": f"sha256:{edl_hash}",
+            "transition_type": self.transition_type,
+            "transition_duration_ms": self.transition_duration_ms,
+            "ken_burns_enabled": self.ken_burns_enabled,
+            "beat_synced": True,
+            "bpm": self.bpm,
+            "beats_per_cut": self.beats_per_cut,
             "total_duration_ms": total_duration_ms,
             "segment_count": len(segments),
             "segments": [seg.to_dict() for seg in segments],

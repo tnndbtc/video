@@ -30,6 +30,7 @@ from app.models.project import Project
 from app.models.timeline import Timeline
 from app.models.user import User
 from app.models.media import MediaAsset
+from app.rules import parse_user_rule
 from app.schemas.render import (
     RenderConflictResponse,
     RenderJobStatus,
@@ -314,6 +315,30 @@ async def start_render(
     db.add(render_job)
     await db.flush()
     await db.refresh(render_job)
+
+    # 4b. Parse rule_text and save render_plan.json if provided
+    # Also include video_length_seconds if provided
+    if request.rule_text or request.video_length_seconds:
+        try:
+            if request.rule_text:
+                render_plan = parse_user_rule(request.rule_text)
+            else:
+                render_plan = {}
+
+            # Add video_length_seconds to render plan
+            if request.video_length_seconds:
+                render_plan["video_length_seconds"] = request.video_length_seconds
+
+            # Save render_plan to filesystem
+            storage_root = get_storage_root()
+            derived_dir = storage_root / "derived" / project_id
+            derived_dir.mkdir(parents=True, exist_ok=True)
+            render_plan_path = derived_dir / "render_plan.json"
+            with open(render_plan_path, "w") as f:
+                json.dump(render_plan, f, indent=2)
+        except Exception:
+            # If parsing fails, continue without render plan (will use natural duration)
+            pass
 
     # 5. Enqueue render task (no edl_hash needed - timeline generated during render)
     try:
