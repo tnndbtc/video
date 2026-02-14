@@ -29,9 +29,9 @@ from app.models.job import RenderJob
 from app.models.project import Project
 from app.models.timeline import Timeline
 from app.models.user import User
+from app.models.media import MediaAsset
 from app.schemas.render import (
     RenderConflictResponse,
-    RenderEdlHashMismatchResponse,
     RenderJobStatus,
     RenderNotFoundResponse,
     RenderPreconditionFailedResponse,
@@ -222,29 +222,17 @@ RENDER_VIDEO_TASK = "app.tasks.render.render_video"
     status_code=status.HTTP_202_ACCEPTED,
     name="start_render",
     summary="Start render job",
-    description="Start a render job (preview or final). Requires edl_hash for race condition prevention.",
+    description="Start a render job (preview or final). Timeline is auto-generated during render.",
     responses={
         400: {
             "model": RenderPreconditionFailedResponse,
-            "description": "Timeline not available for rendering",
+            "description": "Project has no media for rendering",
         },
         409: {
-            "description": "EDL hash mismatch or render already in progress",
+            "description": "Render already in progress",
             "content": {
                 "application/json": {
                     "examples": {
-                        "edl_hash_mismatch": {
-                            "summary": "EDL hash mismatch",
-                            "value": {
-                                "error": "edl_hash_mismatch",
-                                "message": "Timeline has changed since request was initiated",
-                                "details": {
-                                    "provided_hash": "abc123...",
-                                    "current_hash": "xyz789...",
-                                },
-                                "hint": "Fetch updated timeline and retry with current edl_hash",
-                            },
-                        },
                         "render_in_progress": {
                             "summary": "Render already in progress",
                             "value": {
@@ -268,50 +256,39 @@ async def start_render(
     """
     Start a render job for a project.
 
+    Timeline is now auto-generated as part of the render process,
+    ensuring the render always uses the latest project state.
+
     Steps:
     1. Verify project exists and user owns it
-    2. Load timeline from DB and verify it exists
-    3. Compare edl_hash - return 409 if mismatch
-    4. Check for existing in-progress render job of same type
-    5. Create RenderJob record in database
-    6. Enqueue render task
-    7. Return 202 with job details
-
-    The edl_hash parameter prevents race conditions where the timeline
-    might change between when the user loaded the preview and when they
-    clicked render.
+    2. Verify project has media assets
+    3. Check for existing in-progress render job of same type
+    4. Create RenderJob record in database
+    5. Enqueue render task (which will generate timeline + render)
+    6. Return 202 with job details
     """
-    # 1. Get project with timeline loaded
-    project = await get_project_with_timeline(project_id, db, current_user)
+    # 1. Get project
+    project = await get_project_or_404(project_id, db, current_user)
 
-    # 2. Check if timeline exists
-    timeline = project.timeline
-    if timeline is None:
+    # 2. Check if project has any processed media assets
+    media_query = select(MediaAsset).where(
+        MediaAsset.project_id == project_id,
+        MediaAsset.processing_status == "ready",
+    ).limit(1)
+    media_result = await db.execute(media_query)
+    has_media = media_result.scalar_one_or_none() is not None
+
+    if not has_media:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "error": "precondition_failed",
-                "message": "Timeline not available for rendering",
-                "details": {"timeline_generated": False},
+                "message": "No media available for rendering",
+                "details": {"has_media": False},
             },
         )
 
-    # 3. Compare edl_hash
-    if request.edl_hash != timeline.edl_hash:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "edl_hash_mismatch",
-                "message": "Timeline has changed since request was initiated",
-                "details": {
-                    "provided_hash": request.edl_hash,
-                    "current_hash": timeline.edl_hash,
-                },
-                "hint": "Fetch updated timeline and retry with current edl_hash",
-            },
-        )
-
-    # 4. Check for existing in-progress render job of same type
+    # 3. Check for existing in-progress render job of same type
     existing_job = await get_in_progress_render_job(project_id, request.type, db)
     if existing_job is not None:
         raise HTTPException(
@@ -323,12 +300,12 @@ async def start_render(
             },
         )
 
-    # 5. Create RenderJob record
+    # 4. Create RenderJob record (edl_hash will be set during render)
     render_settings = get_render_settings_snapshot(project)
     render_job = RenderJob(
         project_id=project_id,
         job_type=request.type,
-        edl_hash=request.edl_hash,
+        edl_hash="pending",  # Will be set by worker during timeline generation
         render_settings_json=render_settings,
         status="queued",
         progress_percent=0,
@@ -338,19 +315,19 @@ async def start_render(
     await db.flush()
     await db.refresh(render_job)
 
-    # 6. Enqueue render task
+    # 5. Enqueue render task (no edl_hash needed - timeline generated during render)
     try:
         if request.type == "preview":
             rq_job = enqueue_render_preview(
                 project_id=project_id,
-                edl_hash=request.edl_hash,
+                edl_hash="pending",  # Placeholder - worker will generate
                 func=RENDER_VIDEO_TASK,
                 job_id=f"render_preview_{render_job.id}",
             )
         else:  # final
             rq_job = enqueue_render_final(
                 project_id=project_id,
-                edl_hash=request.edl_hash,
+                edl_hash="pending",  # Placeholder - worker will generate
                 func=RENDER_VIDEO_TASK,
                 job_id=f"render_final_{render_job.id}",
             )
@@ -373,12 +350,11 @@ async def start_render(
             },
         )
 
-    # 7. Return response
+    # 6. Return response
     return RenderResponse(
         job_id=render_job.id,
         job_type=render_job.job_type,
         status="queued",
-        edl_hash=render_job.edl_hash,
         created_at=render_job.created_at,
     )
 

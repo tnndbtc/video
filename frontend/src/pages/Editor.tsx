@@ -1,11 +1,10 @@
 import { useParams, Link } from 'react-router-dom';
 import { useProject, useProjectMedia, useDeleteMedia, useReorderMedia } from '../hooks/useMedia';
-import { useTimeline, useTimelineStatus, useGenerateTimeline } from '../hooks/useTimeline';
+import { useTimeline } from '../hooks/useTimeline';
 import { MediaUploader } from '../components/MediaUploader';
 import { MediaGrid } from '../components/MediaGrid';
 import { AudioUploader } from '../components/AudioUploader';
 import { Timeline } from '../components/Timeline';
-import { TimelineControls } from '../components/TimelineControls';
 import { RenderPanel } from '../components/RenderPanel';
 
 function ArrowLeftIcon({ className = '' }: { className?: string }) {
@@ -97,10 +96,8 @@ export function Editor() {
   const { mutate: deleteMedia } = useDeleteMedia(projectId || '');
   const { mutate: reorderMedia } = useReorderMedia(projectId || '');
 
-  // Timeline hooks
+  // Timeline hook (read-only preview)
   const { data: timeline } = useTimeline(projectId || '');
-  const { data: timelineStatus } = useTimelineStatus(projectId || '');
-  const { mutate: generateTimeline, isPending: isGenerating } = useGenerateTimeline(projectId || '');
 
   if (!projectId) {
     return <ErrorDisplay message="No project ID provided" />;
@@ -124,10 +121,6 @@ export function Editor() {
 
   const handleReorderMedia = (newOrder: string[]) => {
     reorderMedia(newOrder);
-  };
-
-  const handleGenerateTimeline = () => {
-    generateTimeline();
   };
 
   return (
@@ -192,7 +185,6 @@ export function Editor() {
               <h2 className="text-lg font-medium text-white mb-3">Timeline Preview</h2>
               {timeline ? (
                 <Timeline
-                  projectId={projectId}
                   timeline={timeline}
                 />
               ) : (
@@ -265,26 +257,12 @@ export function Editor() {
               </section>
             )}
 
-            {/* Timeline Section */}
-            <section className="border-t border-gray-700 pt-6">
-              <h2 className="text-lg font-medium text-white mb-3">Timeline</h2>
-              <TimelineControls
-                projectId={projectId}
-                status={timelineStatus}
-                onGenerate={handleGenerateTimeline}
-                isGenerating={isGenerating}
-                hasAudio={!!project.audio_track}
-                audioAnalyzing={project.audio_track?.analysis_status === 'analyzing'}
-              />
-            </section>
-
             {/* Render Section */}
             <section className="border-t border-gray-700 pt-6">
               <h2 className="text-lg font-medium text-white mb-3">Export</h2>
               <RenderPanel
                 projectId={projectId}
-                edlHash={timelineStatus?.edl_hash || null}
-                hasTimeline={!!timelineStatus?.generated}
+                hasMedia={media.length > 0}
               />
             </section>
           </div>

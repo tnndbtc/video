@@ -2,6 +2,7 @@
  * RenderResult - Display completed render result with download option
  */
 
+import { useState, useEffect, useCallback } from 'react';
 import { formatFileSize, formatRelativeTime } from '../utils/formatSize';
 import { getDownloadUrl } from '../hooks/useRender';
 import type { RenderType, RenderJobStatus } from '../types/render';
@@ -20,6 +21,88 @@ export function RenderResult({
   onRerender,
 }: RenderResultProps) {
   const downloadUrl = getDownloadUrl(projectId, renderType);
+  const [videoBlobUrl, setVideoBlobUrl] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
+
+  // Fetch video with auth for preview playback
+  useEffect(() => {
+    if (renderType !== 'preview' || !status.output_url) return;
+
+    const token = localStorage.getItem('token');
+    let cancelled = false;
+
+    const fetchVideo = async () => {
+      try {
+        setVideoError(null);
+        const response = await fetch(downloadUrl, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const blob = await response.blob();
+        if (!cancelled) {
+          const url = URL.createObjectURL(blob);
+          setVideoBlobUrl(url);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Failed to load video preview:', err);
+          setVideoError('Failed to load video preview');
+        }
+      }
+    };
+
+    fetchVideo();
+
+    // Cleanup on unmount or when deps change
+    return () => {
+      cancelled = true;
+    };
+  }, [renderType, status.output_url, downloadUrl]);
+
+  // Cleanup blob URL when it changes or component unmounts
+  useEffect(() => {
+    return () => {
+      if (videoBlobUrl) {
+        URL.revokeObjectURL(videoBlobUrl);
+      }
+    };
+  }, [videoBlobUrl]);
+
+  // Handle download with auth headers
+  const handleDownload = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    setIsDownloading(true);
+
+    try {
+      const response = await fetch(downloadUrl, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `${renderType}_render.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error('Download failed:', err);
+      alert('Download failed: ' + err);
+    } finally {
+      setIsDownloading(false);
+    }
+  }, [downloadUrl, renderType]);
 
   return (
     <div className="space-y-3">
@@ -83,34 +166,58 @@ export function RenderResult({
 
       {/* Action buttons */}
       <div className="flex gap-2">
-        {/* Download button */}
-        <a
-          href={downloadUrl}
-          download
-          className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white font-medium rounded-lg transition-all duration-200 shadow-lg shadow-green-900/30"
+        {/* Download button - uses fetch with auth headers */}
+        <button
+          type="button"
+          onClick={handleDownload}
+          disabled={isDownloading}
+          className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 disabled:from-green-600/50 disabled:to-green-500/50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-all duration-200 shadow-lg shadow-green-900/30"
         >
-          <svg
-            className="h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-            />
-          </svg>
+          {isDownloading ? (
+            <svg
+              className="animate-spin h-5 w-5"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              />
+            </svg>
+          ) : (
+            <svg
+              className="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              />
+            </svg>
+          )}
           <span>
-            Download
-            {status.file_size && (
+            {isDownloading ? 'Downloading...' : 'Download'}
+            {status.file_size && !isDownloading && (
               <span className="ml-1 text-green-100/80">
                 ({formatFileSize(status.file_size)})
               </span>
             )}
           </span>
-        </a>
+        </button>
 
         {/* Re-render button */}
         <button
@@ -139,14 +246,43 @@ export function RenderResult({
       {/* Optional video preview for preview renders */}
       {renderType === 'preview' && status.output_url && (
         <div className="mt-3 rounded-lg overflow-hidden bg-black aspect-video">
-          <video
-            src={status.output_url}
-            controls
-            className="w-full h-full"
-            preload="metadata"
-          >
-            Your browser does not support the video tag.
-          </video>
+          {videoError ? (
+            <div className="w-full h-full flex items-center justify-center text-red-400 text-sm">
+              {videoError}
+            </div>
+          ) : videoBlobUrl ? (
+            <video
+              src={videoBlobUrl}
+              controls
+              className="w-full h-full"
+              preload="metadata"
+            >
+              Your browser does not support the video tag.
+            </video>
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-gray-400">
+              <svg
+                className="animate-spin h-8 w-8"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                />
+              </svg>
+            </div>
+          )}
         </div>
       )}
     </div>

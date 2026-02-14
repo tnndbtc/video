@@ -17,9 +17,11 @@ Job timeouts:
 - Final: 30 minutes (RENDER_FINAL_TIMEOUT)
 """
 
+import hashlib
 import json
 import logging
 import os
+import uuid
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
@@ -737,17 +739,19 @@ def load_edl_from_path(edl_path: str) -> dict:
         return json.load(f)
 
 
-def enqueue_render(project_id: str, job_type: str, edl_hash: str):
+def enqueue_render(project_id: str, job_type: str):
     """
     Enqueue a render job with proper timeout.
 
     This helper ensures the correct timeout is applied based on job_type.
     Use this instead of directly enqueueing the task.
 
+    Timeline generation is now integrated into the render task itself,
+    so edl_hash is no longer required.
+
     Args:
         project_id: UUID of the project
         job_type: "preview" or "final"
-        edl_hash: Expected EDL hash for race condition prevention
 
     Returns:
         RQ Job instance
@@ -770,7 +774,6 @@ def enqueue_render(project_id: str, job_type: str, edl_hash: str):
         render_video,
         project_id,
         job_type,
-        edl_hash,
         job_timeout=timeout,
     )
 
@@ -821,13 +824,13 @@ def update_render_job_status(
         logger.debug(f"Updated render job {render_job.id} status to {status}")
 
 
-def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
+def render_video(project_id: str, job_type: str) -> dict:
     """
     RQ task to render video output from EDL.
 
     This task:
-    1. Loads project and timeline from database
-    2. Verifies edl_hash matches (race condition prevention)
+    1. Loads project from database
+    2. Generates timeline (EDL) - always regenerates for fresh data
     3. Loads EDL from filesystem
     4. Resolves media paths via database lookup
     5. Creates output directory
@@ -840,18 +843,17 @@ def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
     Args:
         project_id: UUID of the project
         job_type: "preview" or "final"
-        edl_hash: Expected EDL hash (raises ValueError if mismatch)
 
     Returns:
         dict with output_path, file_size, duration_ms
 
     Raises:
-        ValueError: If project/timeline not found, or edl_hash mismatch
+        ValueError: If project/media not found
         FileNotFoundError: If EDL or media files not found
         FFmpegTimeout: If render exceeds timeout
         FFmpegError: If FFmpeg fails
     """
-    logger.info(f"Starting {job_type} render for project={project_id}, edl_hash={edl_hash[:16]}...")
+    logger.info(f"Starting {job_type} render for project={project_id}...")
     update_job_progress(0, f"Starting {job_type} render")
 
     with get_db_session() as db:
@@ -868,24 +870,94 @@ def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
         if not project:
             raise ValueError(f"Project not found: {project_id}")
 
-        update_job_progress(5, "Loading timeline")
+        # =====================================================================
+        # Phase 1: Generate Timeline (0-15%)
+        # =====================================================================
+        update_job_progress(2, "Generating timeline...")
 
-        # Load timeline
+        # Load media assets
+        media_assets = (
+            db.query(MediaAsset)
+            .filter_by(project_id=project_id, processing_status="ready")
+            .order_by(MediaAsset.sort_order)
+            .all()
+        )
+
+        if not media_assets:
+            raise ValueError(f"No processed media assets found for project {project_id}")
+
+        update_job_progress(5, "Building timeline...")
+
+        # Import timeline builder from timeline module
+        from .timeline import TimelineBuilder, save_edl, PAN_DIRECTIONS
+
+        # Extract project settings
+        project_settings = {
+            "transition_type": project.transition_type,
+            "transition_duration_ms": project.transition_duration_ms,
+            "ken_burns_enabled": project.ken_burns_enabled,
+            "output_width": project.output_width,
+            "output_height": project.output_height,
+            "output_fps": project.output_fps,
+        }
+
+        # Build timeline
+        builder = TimelineBuilder(
+            project_id=project_id,
+            media_assets=media_assets,
+            project_settings=project_settings,
+        )
+        edl = builder.build()
+
+        update_job_progress(10, "Saving timeline...")
+
+        # Save EDL to filesystem
+        edl_relative_path = save_edl(edl, project_id)
+
+        # Extract hash (remove 'sha256:' prefix for database storage)
+        edl_hash = edl["edl_hash"]
+        if edl_hash.startswith("sha256:"):
+            edl_hash = edl_hash[7:]
+
+        # Update or create Timeline record
         timeline = db.query(Timeline).filter_by(project_id=project_id).first()
-        if not timeline:
-            raise ValueError(f"Timeline not found for project: {project_id}")
 
-        # Verify edl_hash matches (race condition prevention)
-        if timeline.edl_hash != edl_hash:
-            raise ValueError(
-                f"EDL hash mismatch - timeline has changed. "
-                f"Expected: {edl_hash[:16]}..., Got: {timeline.edl_hash[:16]}..."
+        if timeline:
+            timeline.edl_path = edl_relative_path
+            timeline.total_duration_ms = edl["total_duration_ms"]
+            timeline.segment_count = edl["segment_count"]
+            timeline.edl_hash = edl_hash
+            timeline.modified_at = datetime.utcnow()
+        else:
+            timeline = Timeline(
+                id=str(uuid.uuid4()),
+                project_id=project_id,
+                edl_path=edl_relative_path,
+                total_duration_ms=edl["total_duration_ms"],
+                segment_count=edl["segment_count"],
+                edl_hash=edl_hash,
+                generated_at=datetime.utcnow(),
+                modified_at=datetime.utcnow(),
             )
+            db.add(timeline)
 
-        update_job_progress(10, "Loading EDL")
+        # Update render job with new edl_hash
+        render_job = db.query(RenderJob).filter(
+            RenderJob.project_id == project_id,
+            RenderJob.job_type == job_type,
+            RenderJob.status == "running",
+        ).order_by(RenderJob.created_at.desc()).first()
+        if render_job:
+            render_job.edl_hash = edl_hash
 
-        # Load EDL from filesystem
-        edl = load_edl_from_path(timeline.edl_path)
+        db.commit()
+
+        update_job_progress(15, "Timeline ready, starting render...")
+        logger.info(f"Timeline generated: segments={edl['segment_count']}, hash={edl_hash[:16]}...")
+
+        # =====================================================================
+        # Phase 2: Render (15-100%)
+        # =====================================================================
 
         # Load audio track for path resolution
         audio_track = db.query(AudioTrack).filter_by(project_id=project_id).first()
@@ -893,7 +965,7 @@ def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
         if audio_track:
             audio_path = str(STORAGE_ROOT / audio_track.file_path)
 
-        update_job_progress(15, "Resolving media paths")
+        update_job_progress(17, "Resolving media paths...")
 
         # Create asset path resolver
         resolver = create_asset_path_resolver(db, project_id)
@@ -903,7 +975,7 @@ def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
         if validation_errors:
             raise ValueError(f"EDL validation failed: {'; '.join(validation_errors)}")
 
-        update_job_progress(20, "Building FFmpeg command")
+        update_job_progress(20, "Building FFmpeg command...")
 
         # Determine settings based on job type
         if job_type == "preview":
@@ -912,6 +984,8 @@ def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
             timeout = RENDER_PREVIEW_TIMEOUT
         else:
             settings = RenderSettings()
+            # Ken Burns zoompan filter is very slow - disable for final until optimized
+            edl = simplify_edl_for_preview(edl)
             timeout = RENDER_FINAL_TIMEOUT
 
         # Create output directory and path
@@ -935,7 +1009,7 @@ def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
         # Log full command for debugging FFmpeg issues
         logger.info(f"Full FFmpeg command: {' '.join(cmd)}")
 
-        update_job_progress(25, "Starting FFmpeg render")
+        update_job_progress(22, "Starting FFmpeg render...")
 
         # Calculate total duration for progress tracking
         total_duration_ms = edl.get("total_duration_ms", 0)
@@ -943,9 +1017,10 @@ def render_video(project_id: str, job_type: str, edl_hash: str) -> dict:
             total_duration_ms = max(seg["timeline_out_ms"] for seg in edl["segments"])
 
         # Progress callback that updates RQ job
+        # Scale FFmpeg progress (0-100) to render phase range (22-95)
         def progress_callback(percent: int, message: str) -> None:
-            # Scale FFmpeg progress (0-100) to our range (25-95)
-            scaled_percent = 25 + int(percent * 0.7)
+            # 22% + (percent * 0.73) gives us 22-95% range
+            scaled_percent = 22 + int(percent * 0.73)
             update_job_progress(scaled_percent, message)
 
         # Run FFmpeg with timeout enforcement

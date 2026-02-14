@@ -9,8 +9,6 @@ export interface TimelineSegmentProps {
   segment: TimelineSegmentType;
   pixelsPerMs: number;
   showTransition?: boolean;
-  onDelete?: (index: number) => void;
-  isDeleting?: boolean;
 }
 
 function TransitionIcon({ type }: { type: 'cut' | 'crossfade' | 'fade' }) {
@@ -59,29 +57,14 @@ function MediaTypeIcon({ type }: { type: 'image' | 'video' }) {
   );
 }
 
-function DeleteIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
-      <path
-        fillRule="evenodd"
-        d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-        clipRule="evenodd"
-      />
-    </svg>
-  );
-}
-
-export function TimelineSegment({ segment, pixelsPerMs, showTransition = true, onDelete, isDeleting = false }: TimelineSegmentProps) {
+/**
+ * Read-only timeline segment display.
+ * Shows thumbnail, duration, media type, and effects indicators.
+ */
+export function TimelineSegment({ segment, pixelsPerMs, showTransition = true }: TimelineSegmentProps) {
   const width = Math.max(segment.render_duration_ms * pixelsPerMs, 40); // Minimum 40px width
   const hasKenBurns = segment.effects?.ken_burns != null;
   const hasTransitionIn = showTransition && segment.transition_in != null && segment.transition_in.type !== 'cut';
-
-  const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (onDelete && !isDeleting) {
-      onDelete(segment.index);
-    }
-  };
 
   const borderColor = segment.media_type === 'video' ? 'border-green-500' : 'border-blue-500';
   const bgGradient = segment.media_type === 'video'
@@ -117,25 +100,6 @@ export function TimelineSegment({ segment, pixelsPerMs, showTransition = true, o
 
         {/* Ken Burns indicator */}
         {hasKenBurns && <KenBurnsIcon />}
-
-        {/* Delete button */}
-        {onDelete && (
-          <button
-            onClick={handleDelete}
-            disabled={isDeleting}
-            className="absolute top-1 left-1 z-20 p-1 bg-red-600/90 hover:bg-red-500 text-white rounded transition-all opacity-0 group-hover:opacity-100 disabled:opacity-50 shadow-lg"
-            title="Remove from timeline"
-          >
-            {isDeleting ? (
-              <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            ) : (
-              <DeleteIcon className="w-3 h-3" />
-            )}
-          </button>
-        )}
 
         {/* Segment index badge */}
         <div className="absolute bottom-1 left-1 z-10">

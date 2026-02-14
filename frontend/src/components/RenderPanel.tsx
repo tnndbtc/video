@@ -5,7 +5,7 @@
 
 import { useCallback } from 'react';
 import { clsx } from 'clsx';
-import { useStartRender, useRenderStatus, parseRenderError, getDownloadUrl } from '../hooks/useRender';
+import { useStartRender, useRenderStatus, parseRenderError } from '../hooks/useRender';
 import { RenderButton } from './RenderButton';
 import { RenderProgress } from './RenderProgress';
 import { RenderResult } from './RenderResult';
@@ -14,25 +14,23 @@ import type { RenderType } from '../types/render';
 
 export interface RenderPanelProps {
   projectId: string;
-  edlHash: string | null;
-  hasTimeline: boolean;
+  hasMedia: boolean;
 }
 
 interface RenderSectionProps {
   projectId: string;
   renderType: RenderType;
-  edlHash: string | null;
-  hasTimeline: boolean;
+  hasMedia: boolean;
 }
 
 /**
  * Individual render section (Preview or Final)
+ * Timeline is auto-generated during render, so we only check for media availability.
  */
 function RenderSection({
   projectId,
   renderType,
-  edlHash,
-  hasTimeline,
+  hasMedia,
 }: RenderSectionProps) {
   const { data: status, isLoading: isLoadingStatus, error: statusError } = useRenderStatus(
     projectId,
@@ -46,16 +44,10 @@ function RenderSection({
   const isComplete = status?.status === 'complete';
   const isFailed = status?.status === 'failed';
 
-  // Check if timeline has changed since last render
-  const hasTimelineChanged = status && edlHash && status.edl_hash !== edlHash;
-
   // Determine if render button should be disabled and why
   const getDisabledState = (): { disabled: boolean; reason?: string } => {
-    if (!hasTimeline) {
-      return { disabled: true, reason: 'Generate timeline first' };
-    }
-    if (!edlHash) {
-      return { disabled: true, reason: 'Timeline hash not available' };
+    if (!hasMedia) {
+      return { disabled: true, reason: 'Upload media first' };
     }
     if (isRendering) {
       return { disabled: true, reason: 'Render in progress' };
@@ -68,43 +60,16 @@ function RenderSection({
 
   const { disabled, reason } = getDisabledState();
 
-  // Handle render start
+  // Handle render start (no edlHash needed - timeline auto-generated)
   const handleRender = useCallback(() => {
-    if (!edlHash || disabled) return;
-    startRender.mutate({ type: renderType, edlHash });
-  }, [edlHash, disabled, startRender, renderType]);
+    if (disabled) return;
+    startRender.mutate({ type: renderType });
+  }, [disabled, startRender, renderType]);
 
   // Handle retry after error
   const handleRetry = useCallback(() => {
-    if (!edlHash) return;
-    startRender.mutate({ type: renderType, edlHash });
-  }, [edlHash, startRender, renderType]);
-
-  // Handle download via fetch+blob (works over HTTP)
-  const handleDownload = useCallback(async () => {
-    const url = getDownloadUrl(projectId, renderType);
-    const token = localStorage.getItem('token');
-    try {
-      const response = await fetch(url, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = `${renderType}_render.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(blobUrl);
-    } catch (err) {
-      console.error('Download failed:', err);
-      alert('Download failed: ' + err);
-    }
-  }, [projectId, renderType]);
+    startRender.mutate({ type: renderType });
+  }, [startRender, renderType]);
 
   // Parse mutation error
   const mutationError = startRender.error
@@ -141,16 +106,13 @@ function RenderSection({
         {/* Show error from mutation */}
         {mutationError && (
           <div className="text-sm text-red-400 bg-red-900/20 rounded-lg p-3 border border-red-500/30">
-            {mutationError.isEdlMismatch && (
-              <span>EDL hash mismatch - timeline was updated. Try again.</span>
-            )}
-            {mutationError.isTimelineNotReady && (
-              <span>Timeline is not ready. Generate timeline first.</span>
-            )}
             {mutationError.isRenderInProgress && (
               <span>A render is already in progress.</span>
             )}
-            {!mutationError.isEdlMismatch && !mutationError.isTimelineNotReady && !mutationError.isRenderInProgress && (
+            {mutationError.isTimelineNotReady && (
+              <span>No media available for rendering.</span>
+            )}
+            {!mutationError.isRenderInProgress && !mutationError.isTimelineNotReady && (
               <span>{mutationError.message}</span>
             )}
           </div>
@@ -183,19 +145,25 @@ function RenderSection({
           </div>
         )}
 
-        {/* Render button - show when idle, cancelled, or timeline changed */}
-        {(isIdle || status?.status === 'cancelled' || (isComplete && hasTimelineChanged)) && !isRendering && (
+        {/* Render button - always show when not failed, gray out when rendering */}
+        {(isIdle || status?.status === 'cancelled' || isComplete || isRendering) && (
           <RenderButton
-            label={isPreview ? 'Render Preview' : 'Render Final'}
+            label={
+              isRendering
+                ? (isPreview ? 'Rendering Preview...' : 'Rendering Final...')
+                : isComplete
+                  ? (isPreview ? 'Re-render Preview' : 'Re-render Final')
+                  : (isPreview ? 'Render Preview' : 'Render Final')
+            }
             onClick={handleRender}
             disabled={disabled}
             disabledReason={reason}
-            isLoading={startRender.isPending}
+            isLoading={startRender.isPending || isRendering}
             variant={isPreview ? 'preview' : 'final'}
           />
         )}
 
-        {/* Progress - show when rendering */}
+        {/* Progress bar - show below button when rendering */}
         {isRendering && status && (
           <RenderProgress
             progress={status.progress_percent}
@@ -204,8 +172,8 @@ function RenderSection({
           />
         )}
 
-        {/* Result - show when complete and timeline hasn't changed */}
-        {isComplete && status && !hasTimelineChanged && (
+        {/* Result - show when complete */}
+        {isComplete && status && (
           <RenderResult
             projectId={projectId}
             renderType={renderType}
@@ -220,29 +188,6 @@ function RenderSection({
             error={status.error || 'Render failed'}
             onRetry={handleRetry}
           />
-        )}
-
-        {/* Timeline changed - still show download since media exists */}
-        {hasTimelineChanged && !isRendering && isComplete && status && (
-          <button
-            onClick={handleDownload}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white font-bold rounded-lg transition-all duration-200 shadow-lg shadow-green-900/30 text-lg cursor-pointer"
-          >
-            <svg
-              className="h-5 w-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-              />
-            </svg>
-            Download
-          </button>
         )}
 
         {/* No render status available (404 - no render yet) */}
@@ -263,8 +208,9 @@ function RenderSection({
 
 /**
  * Main RenderPanel component
+ * Timeline is auto-generated during render - we only need to check for media.
  */
-export function RenderPanel({ projectId, edlHash, hasTimeline }: RenderPanelProps) {
+export function RenderPanel({ projectId, hasMedia }: RenderPanelProps) {
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-700 p-6">
       {/* Panel header */}
@@ -295,19 +241,17 @@ export function RenderPanel({ projectId, edlHash, hasTimeline }: RenderPanelProp
         <RenderSection
           projectId={projectId}
           renderType="preview"
-          edlHash={edlHash}
-          hasTimeline={hasTimeline}
+          hasMedia={hasMedia}
         />
         <RenderSection
           projectId={projectId}
           renderType="final"
-          edlHash={edlHash}
-          hasTimeline={hasTimeline}
+          hasMedia={hasMedia}
         />
       </div>
 
-      {/* Global timeline warning */}
-      {!hasTimeline && (
+      {/* No media warning */}
+      {!hasMedia && (
         <div className="mt-4 flex items-center gap-2 text-sm text-gray-400 bg-gray-800 rounded-lg p-3">
           <svg
             className="h-5 w-5 flex-shrink-0"
@@ -322,7 +266,7 @@ export function RenderPanel({ projectId, edlHash, hasTimeline }: RenderPanelProp
               d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
             />
           </svg>
-          <span>Generate a timeline first to enable rendering.</span>
+          <span>Upload media first to enable rendering.</span>
         </div>
       )}
     </div>

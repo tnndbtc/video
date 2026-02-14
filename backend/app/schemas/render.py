@@ -20,12 +20,7 @@ class RenderRequest(BaseModel):
     type: Literal["preview", "final"] = Field(
         ..., description="Render type: 'preview' for quick draft, 'final' for full quality"
     )
-    edl_hash: str = Field(
-        ...,
-        description="EDL hash for race condition prevention",
-        min_length=64,
-        max_length=64,
-    )
+    # Note: edl_hash removed - timeline is now auto-generated during render
 
 
 # --- Response Schemas ---
@@ -37,8 +32,8 @@ class RenderResponse(BaseModel):
     job_id: str = Field(..., description="Unique identifier for the render job")
     job_type: Literal["preview", "final"] = Field(..., description="Type of render job")
     status: Literal["queued"] = Field("queued", description="Initial job status")
-    edl_hash: str = Field(..., description="EDL hash used for this render")
     created_at: datetime = Field(..., description="When the job was created")
+    # Note: edl_hash is set during render, not at queue time
 
     class Config:
         from_attributes = True

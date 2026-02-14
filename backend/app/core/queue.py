@@ -177,18 +177,20 @@ def enqueue_timeline_generation(
 
 def enqueue_render_preview(
     project_id: str,
-    edl_hash: str,
     func: Callable,
     job_id: Optional[str] = None,
+    edl_hash: Optional[str] = None,  # Deprecated, kept for backwards compatibility
 ) -> Job:
     """
     Enqueue a preview render job (high priority).
 
+    Timeline is now auto-generated during render, so edl_hash is not required.
+
     Args:
         project_id: Project UUID
-        edl_hash: Hash of the EDL to verify it hasn't changed
         func: Render function to execute
         job_id: Optional custom job ID
+        edl_hash: Deprecated, ignored
 
     Returns:
         Job: The enqueued RQ job
@@ -198,7 +200,6 @@ def enqueue_render_preview(
         func,
         project_id=project_id,
         job_type="preview",
-        edl_hash=edl_hash,
         job_timeout=JOB_TIMEOUTS["render_preview"],
         job_id=job_id,
     )
@@ -206,18 +207,20 @@ def enqueue_render_preview(
 
 def enqueue_render_final(
     project_id: str,
-    edl_hash: str,
     func: Callable,
     job_id: Optional[str] = None,
+    edl_hash: Optional[str] = None,  # Deprecated, kept for backwards compatibility
 ) -> Job:
     """
     Enqueue a final render job (low priority).
 
+    Timeline is now auto-generated during render, so edl_hash is not required.
+
     Args:
         project_id: Project UUID
-        edl_hash: Hash of the EDL to verify it hasn't changed
         func: Render function to execute
         job_id: Optional custom job ID
+        edl_hash: Deprecated, ignored
 
     Returns:
         Job: The enqueued RQ job
@@ -227,7 +230,6 @@ def enqueue_render_final(
         func,
         project_id=project_id,
         job_type="final",
-        edl_hash=edl_hash,
         job_timeout=JOB_TIMEOUTS["render_final"],
         job_id=job_id,
     )

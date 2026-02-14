@@ -6,10 +6,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Timeline as TimelineType } from '../types/timeline';
 import { TimelineSegment } from './TimelineSegment';
 import { formatTimelineTime, formatDuration } from '../utils/formatTime';
-import { useDeleteSegment } from '../hooks/useTimeline';
 
 export interface TimelineProps {
-  projectId: string;
   timeline: TimelineType | null;
 }
 
@@ -159,29 +157,14 @@ function BeatMarkers({
   );
 }
 
-export function Timeline({ projectId, timeline }: TimelineProps) {
+/**
+ * Read-only timeline viewer component.
+ * Displays timeline segments for preview - editing happens via media reordering.
+ */
+export function Timeline({ timeline }: TimelineProps) {
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
-  const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const pixelsPerMs = ZOOM_LEVELS[zoomIndex];
-
-  const deleteSegmentMutation = useDeleteSegment(projectId);
-
-  const handleDeleteSegment = useCallback((index: number) => {
-    if (timeline && timeline.segments.length <= 1) {
-      alert('Cannot delete the last segment.');
-      return;
-    }
-
-    if (window.confirm(`Remove segment ${index + 1} from the timeline?`)) {
-      setDeletingIndex(index);
-      deleteSegmentMutation.mutate(index, {
-        onSettled: () => {
-          setDeletingIndex(null);
-        },
-      });
-    }
-  }, [deleteSegmentMutation, timeline]);
 
   const handleZoomIn = useCallback(() => {
     setZoomIndex((prev) => Math.min(prev + 1, ZOOM_LEVELS.length - 1));
@@ -264,8 +247,6 @@ export function Timeline({ projectId, timeline }: TimelineProps) {
                   segment={segment}
                   pixelsPerMs={pixelsPerMs}
                   showTransition={index > 0}
-                  onDelete={handleDeleteSegment}
-                  isDeleting={deletingIndex === index}
                 />
               ))}
             </div>

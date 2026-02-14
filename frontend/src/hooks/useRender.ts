@@ -9,15 +9,15 @@ import type { RenderType, RenderResponse, RenderJobStatus } from '../types/rende
 
 /**
  * Hook to start a new render job
+ * Timeline is auto-generated during render, so no edlHash is needed.
  */
 export function useStartRender(projectId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ type, edlHash }: { type: RenderType; edlHash: string }) => {
+    mutationFn: async ({ type }: { type: RenderType }) => {
       const { data } = await api.post<RenderResponse>(`/projects/${projectId}/render`, {
         type,
-        edl_hash: edlHash,
       });
       return data;
     },
@@ -25,6 +25,10 @@ export function useStartRender(projectId: string) {
       // Invalidate the render status query for this type to trigger refetch
       queryClient.invalidateQueries({
         queryKey: ['project', projectId, 'render', data.job_type],
+      });
+      // Also invalidate timeline query since it's regenerated during render
+      queryClient.invalidateQueries({
+        queryKey: ['project', projectId, 'timeline'],
       });
     },
   });
@@ -84,7 +88,6 @@ export function getDownloadUrl(projectId: string, renderType: RenderType): strin
 export interface RenderError {
   status: number;
   message: string;
-  isEdlMismatch: boolean;
   isTimelineNotReady: boolean;
   isRenderInProgress: boolean;
 }
@@ -123,8 +126,7 @@ export function parseRenderError(error: unknown): RenderError {
   return {
     status,
     message,
-    isEdlMismatch: status === 409 && (errorType === 'edl_hash_mismatch' || message.toLowerCase().includes('edl')),
-    isTimelineNotReady: status === 400 && message.toLowerCase().includes('timeline'),
+    isTimelineNotReady: status === 400 && (message.toLowerCase().includes('media') || message.toLowerCase().includes('timeline')),
     isRenderInProgress: status === 409 && (errorType === 'conflict' || message.toLowerCase().includes('progress')),
   };
 }
