@@ -32,6 +32,7 @@ from app.schemas.project import (
     ProjectSettingsResponse,
     ProjectSettingsUpdate,
     ProjectStatusResponse,
+    ProjectUpdate,
     TimelineStatus,
     TimelineSummary,
 )
@@ -299,6 +300,57 @@ async def get_project(
         media_assets=media_summaries,
         audio_track=audio_summary,
         timeline=timeline_summary,
+        timeline_media_ids=project.timeline_media_ids,
+        video_length_seconds=project.video_length_seconds,
+        rule_text=project.rule_text,
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+    )
+
+
+@router.patch(
+    "/{project_id}",
+    response_model=ProjectResponse,
+    summary="Update project",
+    description="Update project name, description, and timeline preview settings.",
+)
+async def update_project(
+    project_id: str,
+    data: ProjectUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> ProjectResponse:
+    """
+    Update project fields including timeline preview settings.
+    """
+    project = await get_project_or_404(project_id, db, current_user, load_relations=True)
+
+    # Update only provided fields
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(project, field, value)
+
+    project.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(project)
+
+    # Build response with all relations
+    media_summaries = [media_asset_to_summary(m) for m in project.media_assets]
+    audio_summary = audio_track_to_summary(project.audio_track) if project.audio_track else None
+    timeline_summary = timeline_to_summary(project.timeline) if project.timeline else None
+
+    return ProjectResponse(
+        id=project.id,
+        name=project.name,
+        description=project.description,
+        status=project.status,
+        settings=project_to_settings(project),
+        media_assets=media_summaries,
+        audio_track=audio_summary,
+        timeline=timeline_summary,
+        timeline_media_ids=project.timeline_media_ids,
+        video_length_seconds=project.video_length_seconds,
+        rule_text=project.rule_text,
         created_at=project.created_at,
         updated_at=project.updated_at,
     )

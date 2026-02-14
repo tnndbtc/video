@@ -50,6 +50,9 @@ export interface Project {
   description?: string;
   media_assets: MediaAsset[];
   audio_track?: AudioTrack | null;
+  timeline_media_ids?: string[] | null;
+  video_length_seconds?: number | null;
+  rule_text?: string | null;
   created_at: string;
   updated_at: string;
 }

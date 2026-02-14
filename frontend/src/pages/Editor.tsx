@@ -1,6 +1,7 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useProject, useProjectMedia, useDeleteMedia, useReorderMedia } from '../hooks/useMedia';
+import { useUpdateProject } from '../hooks/useProjects';
 import { MediaUploader } from '../components/MediaUploader';
 import { MediaGrid } from '../components/MediaGrid';
 import { AudioUploader } from '../components/AudioUploader';
@@ -97,6 +98,7 @@ export function Editor() {
   const { data: media = [], isLoading: isMediaLoading } = useProjectMedia(projectId || '');
   const { mutate: deleteMedia } = useDeleteMedia(projectId || '');
   const { mutate: reorderMedia } = useReorderMedia(projectId || '');
+  const updateProject = useUpdateProject();
 
   // Video length state (in seconds, default 20)
   // Store as string to allow empty input while typing
@@ -109,6 +111,55 @@ export function Editor() {
 
   // Timeline media IDs - ordered list of media added to timeline (starts empty)
   const [timelineMediaIds, setTimelineMediaIds] = useState<string[]>([]);
+
+  // Track if we've initialized from saved data
+  const initializedRef = useRef(false);
+
+  // Initialize state from saved project data
+  useEffect(() => {
+    if (project && !initializedRef.current) {
+      initializedRef.current = true;
+      if (project.timeline_media_ids?.length) {
+        setTimelineMediaIds(project.timeline_media_ids);
+      }
+      if (project.video_length_seconds) {
+        setVideoLengthInput(String(project.video_length_seconds));
+      }
+      if (project.rule_text) {
+        setRuleText(project.rule_text);
+      }
+    }
+  }, [project]);
+
+  // Auto-save with debounce
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    // Don't save until we've initialized from project
+    if (!initializedRef.current || !projectId) return;
+
+    // Clear previous timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Debounce save by 1 second
+    saveTimeoutRef.current = setTimeout(() => {
+      updateProject.mutate({
+        projectId,
+        data: {
+          timeline_media_ids: timelineMediaIds,
+          video_length_seconds: videoLengthSeconds,
+          rule_text: ruleText || undefined,
+        },
+      });
+    }, 1000);
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [timelineMediaIds, videoLengthSeconds, ruleText, projectId]);
 
   // Parse rule text for live preview
   const parsedRule = useMemo(() => parseRuleText(ruleText), [ruleText]);
@@ -230,8 +281,17 @@ export function Editor() {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Placeholder for future actions like export */}
+          <div className="flex items-center gap-3">
+            {/* Auto-save indicator */}
+            {updateProject.isPending && (
+              <span className="text-xs text-blue-400 flex items-center gap-1">
+                <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Saving...
+              </span>
+            )}
             <span className="text-sm text-gray-500">
               {media.length} media file{media.length !== 1 ? 's' : ''}
             </span>

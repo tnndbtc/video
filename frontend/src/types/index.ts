@@ -39,6 +39,9 @@ export interface ProjectListItem {
 export interface CreateProjectData {
   name: string;
   description?: string;
+  timeline_media_ids?: string[];
+  video_length_seconds?: number;
+  rule_text?: string;
 }
 
 export interface AuthResponse {

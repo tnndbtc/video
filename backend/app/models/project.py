@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 import uuid
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -102,6 +102,26 @@ class Project(Base):
         default=30,
         nullable=False,
         doc="Output video frames per second"
+    )
+
+    # Timeline preview settings (auto-saved from editor)
+    timeline_media_ids: Mapped[Optional[List[str]]] = mapped_column(
+        JSON,
+        nullable=True,
+        default=None,
+        doc="Ordered list of media IDs in timeline preview"
+    )
+    video_length_seconds: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        default=None,
+        doc="Target video length in seconds"
+    )
+    rule_text: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        default=None,
+        doc="Beat rule text (e.g., '2 beats', 'fast')"
     )
 
     # Status tracking

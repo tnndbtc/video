@@ -117,7 +117,7 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
-    """Schema for updating project (name/description)."""
+    """Schema for updating project (name/description and timeline settings)."""
 
     name: Optional[str] = Field(
         default=None,
@@ -129,6 +129,21 @@ class ProjectUpdate(BaseModel):
         default=None,
         max_length=500,
         description="Optional project description"
+    )
+    timeline_media_ids: Optional[List[str]] = Field(
+        default=None,
+        description="Ordered list of media IDs in timeline preview"
+    )
+    video_length_seconds: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=3600,
+        description="Target video length in seconds"
+    )
+    rule_text: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Beat rule text (e.g., '2 beats', 'fast')"
     )
 
 
@@ -193,6 +208,9 @@ class ProjectResponse(BaseModel):
     media_assets: List[MediaAssetSummary] = []
     audio_track: Optional[AudioTrackSummary] = None
     timeline: Optional[TimelineSummary] = None
+    timeline_media_ids: Optional[List[str]] = None
+    video_length_seconds: Optional[int] = None
+    rule_text: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
