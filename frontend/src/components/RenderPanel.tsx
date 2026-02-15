@@ -17,6 +17,8 @@ export interface RenderPanelProps {
   hasMedia: boolean;
   ruleText: string;
   videoLengthSeconds: number;
+  timelineMediaIds: string[];
+  savedTimelineMediaIds?: string[] | null;
 }
 
 interface RenderSectionProps {
@@ -222,7 +224,7 @@ function RenderSection({
  * Main RenderPanel component
  * Timeline is auto-generated during render - we only need to check for media.
  */
-export function RenderPanel({ projectId, hasMedia, ruleText, videoLengthSeconds }: RenderPanelProps) {
+export function RenderPanel({ projectId, hasMedia, ruleText, videoLengthSeconds, timelineMediaIds, savedTimelineMediaIds }: RenderPanelProps) {
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-700 p-6">
       {/* Panel header */}
@@ -246,6 +248,12 @@ export function RenderPanel({ projectId, hasMedia, ruleText, videoLengthSeconds 
         <p className="text-sm text-gray-400 mt-1">
           Export your video as a preview or final render
         </p>
+      </div>
+
+      {/* Debug: Show timeline IDs being used for render */}
+      <div className="mb-4 p-2 bg-orange-900/50 rounded text-xs text-orange-300 font-mono">
+        <div>DEBUG - RenderPanel received IDs: [{timelineMediaIds.join(', ')}]</div>
+        <div>Saved timeline_media_ids: {savedTimelineMediaIds?.length ?? 0} items - [{savedTimelineMediaIds?.join(', ') ?? 'none'}]</div>
       </div>
 
       {/* Render sections */}

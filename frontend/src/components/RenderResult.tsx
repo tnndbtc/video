@@ -25,17 +25,26 @@ export function RenderResult({
   const [isDownloading, setIsDownloading] = useState(false);
   const [videoError, setVideoError] = useState<string | null>(null);
 
-  // Fetch video with auth for preview playback
+  // Fetch video with auth for playback (both preview and final)
+  // Use completed_at as cache-buster to ensure we get the latest video
   useEffect(() => {
-    if (renderType !== 'preview' || !status.output_url) return;
+    if (!status.output_url) return;
 
     const token = localStorage.getItem('token');
     let cancelled = false;
 
+    // Clear current video to show loading state
+    setVideoBlobUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+
     const fetchVideo = async () => {
       try {
         setVideoError(null);
-        const response = await fetch(downloadUrl, {
+        // Add cache-busting timestamp to force fresh fetch
+        const cacheBuster = status.completed_at ? `?t=${new Date(status.completed_at).getTime()}` : '';
+        const response = await fetch(`${downloadUrl}${cacheBuster}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
 
@@ -62,7 +71,7 @@ export function RenderResult({
     return () => {
       cancelled = true;
     };
-  }, [renderType, status.output_url, downloadUrl]);
+  }, [status.output_url, status.completed_at, downloadUrl]);
 
   // Cleanup blob URL when it changes or component unmounts
   useEffect(() => {
@@ -243,8 +252,8 @@ export function RenderResult({
         </button>
       </div>
 
-      {/* Optional video preview for preview renders */}
-      {renderType === 'preview' && status.output_url && (
+      {/* Video preview for both preview and final renders */}
+      {status.output_url && (
         <div className="mt-3 rounded-lg overflow-hidden bg-black aspect-video">
           {videoError ? (
             <div className="w-full h-full flex items-center justify-center text-red-400 text-sm">

@@ -316,29 +316,43 @@ async def start_render(
     await db.flush()
     await db.refresh(render_job)
 
-    # 4b. Parse rule_text and save render_plan.json if provided
-    # Also include video_length_seconds if provided
-    if request.rule_text or request.video_length_seconds:
-        try:
-            if request.rule_text:
-                render_plan = parse_user_rule(request.rule_text)
-            else:
-                render_plan = {}
+    # 4b. Build render_plan.json with timeline settings
+    # Include timeline_media_ids from project, rule_text, and video_length_seconds
+    try:
+        if request.rule_text:
+            render_plan = parse_user_rule(request.rule_text)
+        else:
+            render_plan = {}
 
-            # Add video_length_seconds to render plan
-            if request.video_length_seconds:
-                render_plan["video_length_seconds"] = request.video_length_seconds
+        # Add video_length_seconds to render plan
+        if request.video_length_seconds:
+            render_plan["video_length_seconds"] = request.video_length_seconds
 
-            # Save render_plan to filesystem
-            storage_root = get_storage_root()
-            derived_dir = storage_root / "derived" / project_id
-            derived_dir.mkdir(parents=True, exist_ok=True)
-            render_plan_path = derived_dir / "render_plan.json"
-            with open(render_plan_path, "w") as f:
-                json.dump(render_plan, f, indent=2)
-        except Exception:
-            # If parsing fails, continue without render plan (will use natural duration)
-            pass
+        # Add timeline_media_ids from project (the user's timeline preview order)
+        # DEBUG: Log what we're reading from project
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"DEBUG: project.timeline_media_ids = {project.timeline_media_ids}")
+
+        if project.timeline_media_ids:
+            render_plan["timeline_media_ids"] = project.timeline_media_ids
+            logger.warning(f"DEBUG: Added timeline_media_ids to render_plan: {project.timeline_media_ids}")
+        else:
+            logger.warning("DEBUG: No timeline_media_ids found on project!")
+
+        # Save render_plan to filesystem
+        storage_root = get_storage_root()
+        derived_dir = storage_root / "derived" / project_id
+        derived_dir.mkdir(parents=True, exist_ok=True)
+        render_plan_path = derived_dir / "render_plan.json"
+        with open(render_plan_path, "w") as f:
+            json.dump(render_plan, f, indent=2)
+        logger.warning(f"DEBUG: Saved render_plan.json: {render_plan}")
+    except Exception as e:
+        # If parsing fails, continue without render plan (will use natural duration)
+        import logging
+        logging.getLogger(__name__).warning(f"DEBUG: Exception in render_plan: {e}")
+        pass
 
     # 5. Enqueue render task (no edl_hash needed - timeline generated during render)
     try:

@@ -20,7 +20,7 @@ from .redis import get_redis_connection
 # Rate limits by category: (requests, window_seconds)
 RATE_LIMITS: dict[str, tuple[int, int]] = {
     "upload": (10, 60),      # 10 requests per minute
-    "render": (5, 300),      # 5 requests per 5 minutes
+    "render": (20, 300),     # 20 requests per 5 minutes (increased for dev)
     "analyze": (10, 60),     # 10 requests per minute
     "default": (500, 60),    # 500 requests per minute (allows for polling)
 }

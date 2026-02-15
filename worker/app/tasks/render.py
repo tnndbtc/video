@@ -875,13 +875,38 @@ def render_video(project_id: str, job_type: str) -> dict:
         # =====================================================================
         update_job_progress(2, "Generating timeline...")
 
-        # Load media assets
-        media_assets = (
-            db.query(MediaAsset)
-            .filter_by(project_id=project_id, processing_status="ready")
-            .order_by(MediaAsset.sort_order)
-            .all()
-        )
+        # Load render_plan.json first (to get timeline_media_ids if present)
+        render_plan = None
+        render_plan_path = STORAGE_ROOT / "derived" / project_id / "render_plan.json"
+        if render_plan_path.exists():
+            try:
+                with open(render_plan_path) as f:
+                    render_plan = json.load(f)
+                logger.info(f"Loaded render_plan: {render_plan}")
+            except Exception as e:
+                logger.warning(f"Failed to load render_plan.json: {e}")
+
+        # Load media assets - use timeline_media_ids if provided in render_plan
+        timeline_media_ids = render_plan.get("timeline_media_ids") if render_plan else None
+
+        if timeline_media_ids:
+            # Load only the specified media in the specified order
+            all_media = (
+                db.query(MediaAsset)
+                .filter_by(project_id=project_id, processing_status="ready")
+                .all()
+            )
+            media_by_id = {m.id: m for m in all_media}
+            media_assets = [media_by_id[mid] for mid in timeline_media_ids if mid in media_by_id]
+            logger.info(f"Using timeline_media_ids: {len(media_assets)} media items")
+        else:
+            # Fall back to all media sorted by sort_order
+            media_assets = (
+                db.query(MediaAsset)
+                .filter_by(project_id=project_id, processing_status="ready")
+                .order_by(MediaAsset.sort_order)
+                .all()
+            )
 
         if not media_assets:
             raise ValueError(f"No processed media assets found for project {project_id}")
@@ -900,17 +925,6 @@ def render_video(project_id: str, job_type: str) -> dict:
             "output_height": project.output_height,
             "output_fps": project.output_fps,
         }
-
-        # Load render_plan.json if exists (for beat-synced rendering)
-        render_plan = None
-        render_plan_path = STORAGE_ROOT / "derived" / project_id / "render_plan.json"
-        if render_plan_path.exists():
-            try:
-                with open(render_plan_path) as f:
-                    render_plan = json.load(f)
-                logger.info(f"Loaded render_plan: {render_plan}")
-            except Exception as e:
-                logger.warning(f"Failed to load render_plan.json: {e}")
 
         # Build beat_config from audio track + render_plan
         beat_config = None

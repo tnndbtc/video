@@ -336,6 +336,11 @@ export function Editor() {
                   </span>
                 )}
               </h2>
+              {/* DEBUG: Show timeline media IDs */}
+              <div className="mb-2 p-2 bg-yellow-900/50 rounded text-xs text-yellow-300 font-mono">
+                <div>DEBUG - Timeline IDs: [{timelineMediaIds.join(', ')}]</div>
+                <div>Saved to project: {project?.timeline_media_ids?.length ?? 0} items</div>
+              </div>
               {/* Drop zone wrapper - always accepts drops */}
               <div
                 className="relative border-2 border-dashed border-transparent hover:border-gray-600 transition-colors"
@@ -480,6 +485,8 @@ export function Editor() {
                 hasMedia={media.length > 0}
                 ruleText={ruleText}
                 videoLengthSeconds={videoLengthSeconds}
+                timelineMediaIds={timelineMediaIds}
+                savedTimelineMediaIds={project?.timeline_media_ids}
               />
             </section>
           </div>
