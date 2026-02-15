@@ -250,12 +250,6 @@ export function RenderPanel({ projectId, hasMedia, ruleText, videoLengthSeconds,
         </p>
       </div>
 
-      {/* Debug: Show timeline IDs being used for render */}
-      <div className="mb-4 p-2 bg-orange-900/50 rounded text-xs text-orange-300 font-mono">
-        <div>DEBUG - RenderPanel received IDs: [{timelineMediaIds.join(', ')}]</div>
-        <div>Saved timeline_media_ids: {savedTimelineMediaIds?.length ?? 0} items - [{savedTimelineMediaIds?.join(', ') ?? 'none'}]</div>
-      </div>
-
       {/* Render sections */}
       <div className="flex flex-col lg:flex-row gap-4">
         <RenderSection
