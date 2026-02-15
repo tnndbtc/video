@@ -152,6 +152,13 @@ class EDLSegment:
     ken_burns: Optional[Dict[str, Any]] = None
     transition_in: Optional[Dict[str, Any]] = None
     transition_out: Optional[Dict[str, Any]] = None
+    effects: Optional[Dict[str, Any]] = None
+    # effects = {
+    #     "motion_preset": "slow_zoom_in",
+    #     "motion_strength": 1.0,
+    #     "beat_sync_mode": "none",  # "none", "downbeat", "every_n_beats"
+    #     "beat_sync_n": 4
+    # }
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -167,6 +174,7 @@ class EDLSegment:
             "ken_burns": self.ken_burns,
             "transition_in": self.transition_in,
             "transition_out": self.transition_out,
+            "effects": self.effects,
         }
 
 
@@ -283,8 +291,9 @@ class TimelineBuilder:
 
             # Calculate Ken Burns effect for images
             ken_burns = None
+            effects = None
             if asset.media_type == "image" and self.ken_burns_enabled:
-                ken_burns = self._calculate_ken_burns(duration_ms)
+                ken_burns, effects = self._calculate_ken_burns(duration_ms)
 
             # Create segment
             segment = EDLSegment(
@@ -299,6 +308,7 @@ class TimelineBuilder:
                 ken_burns=ken_burns,
                 transition_in=None,
                 transition_out=None,
+                effects=effects,
             )
             segments.append(segment)
             timeline_position += duration_ms
@@ -368,8 +378,9 @@ class TimelineBuilder:
 
             # Calculate Ken Burns effect for images
             ken_burns = None
+            effects = None
             if asset.media_type == "image" and self.ken_burns_enabled:
-                ken_burns = self._calculate_ken_burns(duration_ms)
+                ken_burns, effects = self._calculate_ken_burns(duration_ms)
 
             # Create segment
             segment = EDLSegment(
@@ -384,6 +395,7 @@ class TimelineBuilder:
                 ken_burns=ken_burns,
                 transition_in=None,
                 transition_out=None,
+                effects=effects,
             )
             segments.append(segment)
 
@@ -417,9 +429,9 @@ class TimelineBuilder:
 
         return edl
 
-    def _calculate_ken_burns(self, duration_ms: int) -> dict:
+    def _calculate_ken_burns(self, duration_ms: int) -> tuple:
         """
-        Calculate Ken Burns effect parameters.
+        Calculate Ken Burns effect parameters and motion preset.
 
         Alternates zoom directions (in/out) and cycles through pan directions.
 
@@ -427,7 +439,7 @@ class TimelineBuilder:
             duration_ms: Duration of the segment in milliseconds
 
         Returns:
-            dict with Ken Burns parameters
+            Tuple of (ken_burns dict, effects dict)
         """
         zoom_min, zoom_max = self.ken_burns_zoom_range
 
@@ -435,9 +447,11 @@ class TimelineBuilder:
         if self._kb_zoom_direction:
             start_zoom = zoom_min
             end_zoom = zoom_max
+            motion_preset = "slow_zoom_in"
         else:
             start_zoom = zoom_max
             end_zoom = zoom_min
+            motion_preset = "slow_zoom_out"
 
         self._kb_zoom_direction = not self._kb_zoom_direction
 
@@ -445,11 +459,26 @@ class TimelineBuilder:
         pan_direction = PAN_DIRECTIONS[self._kb_pan_index % len(PAN_DIRECTIONS)]
         self._kb_pan_index += 1
 
-        return {
+        # Map legacy pan_direction to motion presets for special cases
+        if pan_direction == "left_to_right":
+            motion_preset = "pan_left"
+        elif pan_direction == "right_to_left":
+            motion_preset = "pan_right"
+
+        ken_burns = {
             "start_zoom": round(start_zoom, 2),
             "end_zoom": round(end_zoom, 2),
             "pan_direction": pan_direction,
         }
+
+        effects = {
+            "motion_preset": motion_preset,
+            "motion_strength": 1.0,
+            "beat_sync_mode": "none",
+            "beat_sync_n": 4,
+        }
+
+        return ken_burns, effects
 
     def _apply_transition_overlaps(self, segments: List[EDLSegment]) -> List[EDLSegment]:
         """

@@ -44,6 +44,11 @@ from sqlalchemy.orm import declarative_base
 
 from ..db import get_db_session
 from .ffmpeg_runner import FFmpegError, FFmpegTimeout, run_ffmpeg_with_progress
+from .motion_engine import (
+    MotionClipCache,
+    RenderConfig as MotionRenderConfig,
+    prerender_segment_clips,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +227,7 @@ class FFmpegCommandBuilder:
     Key design:
     - One input per unique media asset (not per segment)
     - Use trim + setpts to carve segments from inputs
-    - Images use -loop 1 + trim by time
+    - Images use -loop 1 + trim by time (or pre-rendered motion clips)
     - Audio input tracked explicitly
     """
 
@@ -233,6 +238,7 @@ class FFmpegCommandBuilder:
         output_path: str,
         asset_path_resolver: Callable[[str], str],
         audio_path: Optional[str] = None,
+        motion_clip_resolver: Optional[Callable[[int], Optional[str]]] = None,
     ):
         """
         Initialize the FFmpeg command builder.
@@ -243,15 +249,18 @@ class FFmpegCommandBuilder:
             output_path: Path for output video file
             asset_path_resolver: Function that resolves asset_id to file path
             audio_path: Optional path to audio file (resolved at initialization)
+            motion_clip_resolver: Function that resolves segment_index to pre-rendered clip path
         """
         self.edl = edl
         self.settings = settings
         self.output_path = output_path
         self.resolve_asset_path = asset_path_resolver
         self.audio_path = audio_path
+        self.motion_clip_resolver = motion_clip_resolver
 
         # Track input indices
         self.input_map: Dict[str, int] = {}  # asset_id -> input_index
+        self.segment_input_map: Dict[int, int] = {}  # segment_index -> input_index (for motion clips)
         self.next_input_idx = 0
         self.audio_input_idx: Optional[int] = None
 
@@ -281,31 +290,44 @@ class FFmpegCommandBuilder:
         """
         Build input arguments.
 
-        - One input per unique media asset
+        - Uses pre-rendered motion clips when available (one per segment)
+        - Otherwise: one input per unique media asset
         - Images get -loop 1 to allow trim by time
         - Audio input added last
         """
         inputs = []
         seen_assets: Set[str] = set()
 
-        # Add media inputs (deduplicated by asset_id)
+        # Add media inputs
         for segment in self.edl["segments"]:
+            seg_idx = segment["segment_index"]
             asset_id = segment["media_asset_id"]
-            if asset_id in seen_assets:
-                continue
-            seen_assets.add(asset_id)
-
-            file_path = self.resolve_asset_path(asset_id)
             media_type = segment["media_type"]
 
-            if media_type == "image":
-                # -loop 1 allows trimming image stream by time
-                inputs.extend(["-loop", "1", "-i", file_path])
-            else:
-                inputs.extend(["-i", file_path])
+            # Check for pre-rendered motion clip first
+            motion_clip_path = None
+            if self.motion_clip_resolver and media_type == "image":
+                motion_clip_path = self.motion_clip_resolver(seg_idx)
 
-            self.input_map[asset_id] = self.next_input_idx
-            self.next_input_idx += 1
+            if motion_clip_path:
+                # Use pre-rendered motion clip (each segment gets its own input)
+                inputs.extend(["-i", motion_clip_path])
+                self.segment_input_map[seg_idx] = self.next_input_idx
+                self.next_input_idx += 1
+            else:
+                # Traditional handling: deduplicate by asset_id
+                if asset_id not in seen_assets:
+                    seen_assets.add(asset_id)
+                    file_path = self.resolve_asset_path(asset_id)
+
+                    if media_type == "image":
+                        # -loop 1 allows trimming image stream by time
+                        inputs.extend(["-loop", "1", "-i", file_path])
+                    else:
+                        inputs.extend(["-i", file_path])
+
+                    self.input_map[asset_id] = self.next_input_idx
+                    self.next_input_idx += 1
 
         # Add audio input
         if self.audio_path:
@@ -327,14 +349,27 @@ class FFmpegCommandBuilder:
         # Process each segment
         for seg in self.edl["segments"]:
             seg_idx = seg["segment_index"]
-            input_idx = self.input_map[seg["media_asset_id"]]
-            in_label = f"[{input_idx}:v]"
             out_label = f"[v{seg_idx}]"
 
             duration_sec = seg["render_duration_ms"] / 1000
             source_in_sec = seg["source_in_ms"] / 1000
 
-            if seg["media_type"] == "image":
+            # Check if this segment has a pre-rendered motion clip
+            if seg_idx in self.segment_input_map:
+                # Pre-rendered motion clip: just copy with frame rate normalization
+                input_idx = self.segment_input_map[seg_idx]
+                in_label = f"[{input_idx}:v]"
+                filter_chain = (
+                    f"{in_label}"
+                    f"setpts=PTS-STARTPTS,"
+                    f"fps={fps},"
+                    f"setsar=1{out_label}"
+                )
+            elif seg["media_type"] == "image":
+                # Traditional image handling
+                input_idx = self.input_map[seg["media_asset_id"]]
+                in_label = f"[{input_idx}:v]"
+
                 # Image: trim by time, apply Ken Burns or scale
                 kb = seg.get("ken_burns")
                 if kb and kb.get("start_zoom") is not None:
@@ -353,6 +388,8 @@ class FFmpegCommandBuilder:
                     )
             else:
                 # Video: trim from source_in to source_in + duration
+                input_idx = self.input_map[seg["media_asset_id"]]
+                in_label = f"[{input_idx}:v]"
                 filter_chain = (
                     f"{in_label}"
                     f"trim=start={source_in_sec}:duration={duration_sec},"
@@ -1020,18 +1057,63 @@ def render_video(project_id: str, job_type: str) -> dict:
         if validation_errors:
             raise ValueError(f"EDL validation failed: {'; '.join(validation_errors)}")
 
-        update_job_progress(20, "Building FFmpeg command...")
+        update_job_progress(20, "Preparing render...")
 
         # Determine settings based on job type
+        motion_clip_paths = {}  # segment_index -> pre-rendered clip path
+
         if job_type == "preview":
             settings = PreviewSettings()
-            edl = simplify_edl_for_preview(edl)
             timeout = RENDER_PREVIEW_TIMEOUT
         else:
             settings = RenderSettings()
-            # Ken Burns zoompan filter is very slow - disable for final until optimized
-            edl = simplify_edl_for_preview(edl)
             timeout = RENDER_FINAL_TIMEOUT
+
+        # Pre-render motion clips for both preview and final renders
+        update_job_progress(22, "Pre-rendering motion clips...")
+
+        # Check if any image segments have effects
+        image_segments = [s for s in edl["segments"] if s.get("media_type") == "image"]
+        if image_segments and any(s.get("effects") for s in image_segments):
+            motion_config = MotionRenderConfig(
+                width=settings.width,
+                height=settings.height,
+                fps=settings.fps,
+                crf=settings.crf,
+                preset=settings.preset,
+            )
+
+            # Get beat grid path if audio analysis exists
+            beat_grid_path = None
+            if audio_track and audio_track.beat_grid_path:
+                beat_grid_path = str(STORAGE_ROOT / audio_track.beat_grid_path)
+
+            cache = MotionClipCache()
+
+            def prerender_progress(current: int, total: int) -> None:
+                # Map prerender progress to 22-40% range
+                percent = 22 + int((current / total) * 18) if total > 0 else 22
+                update_job_progress(percent, f"Pre-rendering clips: {current}/{total}")
+
+            try:
+                motion_clip_paths = prerender_segment_clips(
+                    segments=edl["segments"],
+                    asset_path_resolver=resolver,
+                    config=motion_config,
+                    cache=cache,
+                    beat_grid_path=beat_grid_path,
+                    progress_callback=prerender_progress,
+                )
+                logger.info(f"Pre-rendered {len(motion_clip_paths)} motion clips")
+            except Exception as e:
+                logger.warning(f"Motion clip pre-rendering failed, falling back: {e}")
+                motion_clip_paths = {}
+
+        # If no pre-rendered clips, simplify EDL (removes effects that need pre-rendering)
+        if not motion_clip_paths:
+            edl = simplify_edl_for_preview(edl)
+
+        update_job_progress(40, "Building FFmpeg command...")
 
         # Create output directory and path
         output_dir = STORAGE_ROOT / "outputs" / project_id / job_type
@@ -1041,6 +1123,12 @@ def render_video(project_id: str, job_type: str) -> dict:
         output_filename = f"render_{timestamp}.mp4"
         output_path = output_dir / output_filename
 
+        # Create motion clip resolver if we have pre-rendered clips
+        motion_clip_resolver = None
+        if motion_clip_paths:
+            def motion_clip_resolver(seg_idx: int) -> Optional[str]:
+                return motion_clip_paths.get(seg_idx)
+
         # Build FFmpeg command
         builder = FFmpegCommandBuilder(
             edl=edl,
@@ -1048,13 +1136,14 @@ def render_video(project_id: str, job_type: str) -> dict:
             output_path=str(output_path),
             asset_path_resolver=resolver,
             audio_path=audio_path,
+            motion_clip_resolver=motion_clip_resolver,
         )
         cmd = builder.build()
 
         # Log full command for debugging FFmpeg issues
         logger.info(f"Full FFmpeg command: {' '.join(cmd)}")
 
-        update_job_progress(22, "Starting FFmpeg render...")
+        update_job_progress(42, "Starting FFmpeg render...")
 
         # Calculate total duration for progress tracking
         total_duration_ms = edl.get("total_duration_ms", 0)
@@ -1062,10 +1151,10 @@ def render_video(project_id: str, job_type: str) -> dict:
             total_duration_ms = max(seg["timeline_out_ms"] for seg in edl["segments"])
 
         # Progress callback that updates RQ job
-        # Scale FFmpeg progress (0-100) to render phase range (22-95)
+        # Scale FFmpeg progress (0-100) to render phase range (42-95)
         def progress_callback(percent: int, message: str) -> None:
-            # 22% + (percent * 0.73) gives us 22-95% range
-            scaled_percent = 22 + int(percent * 0.73)
+            # 42% + (percent * 0.53) gives us 42-95% range
+            scaled_percent = 42 + int(percent * 0.53)
             update_job_progress(scaled_percent, message)
 
         # Run FFmpeg with timeout enforcement

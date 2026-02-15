@@ -50,10 +50,36 @@ class TimelineTransition(BaseModel):
     duration_ms: int = Field(..., description="Transition duration in milliseconds")
 
 
+class SegmentEffects(BaseModel):
+    """Motion effects configuration for a segment."""
+
+    motion_preset: Optional[str] = Field(
+        None,
+        description="Motion preset name (slow_zoom_in, slow_zoom_out, pan_left, pan_right, diagonal_push, subtle_drift)"
+    )
+    motion_strength: float = Field(
+        1.0,
+        ge=0.0,
+        le=1.0,
+        description="Motion effect strength (0.0 = no motion, 1.0 = full motion)"
+    )
+    beat_sync_mode: Literal["none", "downbeat", "every_n_beats"] = Field(
+        "none",
+        description="Beat synchronization mode for zoom pulses"
+    )
+    beat_sync_n: int = Field(
+        4,
+        ge=1,
+        le=32,
+        description="For every_n_beats mode, pulse every N beats"
+    )
+
+
 class TimelineEffects(BaseModel):
     """Effects applied to a timeline segment."""
 
     ken_burns: Optional[Dict[str, Any]] = Field(None, description="Ken Burns effect settings")
+    motion: Optional[SegmentEffects] = Field(None, description="Motion engine effects")
 
 
 class TimelineSegment(BaseModel):
