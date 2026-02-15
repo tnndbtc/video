@@ -184,7 +184,7 @@ setup_environment() {
 # =============================================================================
 
 start_containers() {
-    print_header "Starting Docker Containers"
+    print_header "Starting Docker Containers (Quick Rebuild)"
 
     # Determine docker compose command
     local compose_cmd
@@ -194,7 +194,7 @@ start_containers() {
         compose_cmd="docker-compose"
     fi
 
-    print_info "Building and starting containers..."
+    print_info "Building and starting containers (preserving data)..."
     echo ""
 
     $compose_cmd up -d --build
@@ -205,6 +205,59 @@ start_containers() {
     # Wait for services to be ready
     print_info "Waiting for services to initialize (10 seconds)..."
     sleep 10
+
+    # Run database migrations
+    print_info "Running database migrations..."
+    if $compose_cmd exec -T backend alembic upgrade head 2>/dev/null; then
+        print_success "Database migrations completed!"
+    else
+        print_warning "Could not run migrations (backend may still be starting)"
+        print_info "You can run migrations manually: docker compose exec backend alembic upgrade head"
+    fi
+
+    return 0
+}
+
+full_reset() {
+    print_header "Full Reset (Wipe Everything)"
+
+    # Determine docker compose command
+    local compose_cmd
+    if docker compose version >/dev/null 2>&1; then
+        compose_cmd="docker compose"
+    else
+        compose_cmd="docker-compose"
+    fi
+
+    echo -e "${RED}WARNING: This will delete ALL data including:${NC}"
+    echo -e "  - Database (all users, projects, media)"
+    echo -e "  - Uploaded files"
+    echo -e "  - Redis data"
+    echo -e "  - Docker build cache"
+    echo ""
+    read -p "Are you sure you want to continue? (y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    print_info "Stopping and removing containers and volumes..."
+    $compose_cmd down -v
+
+    print_info "Clearing Docker build cache..."
+    docker builder prune -af 2>/dev/null || true
+
+    print_info "Building and starting fresh containers..."
+    echo ""
+
+    $compose_cmd up -d --build
+
+    echo ""
+    print_success "Fresh environment created!"
+
+    # Wait for services to be ready
+    print_info "Waiting for services to initialize (15 seconds)..."
+    sleep 15
 
     # Run database migrations
     print_info "Running database migrations..."
@@ -392,19 +445,22 @@ show_menu() {
     echo -e "${CYAN}       BeatStitch Setup Menu${NC}"
     echo -e "${CYAN}============================================${NC}"
     echo ""
-    echo -e "  ${BOLD}1)${NC} Setup running environment"
-    echo -e "     ${YELLOW}(Create containers if needed, start services)${NC}"
+    echo -e "  ${BOLD}1)${NC} Quick start/rebuild"
+    echo -e "     ${YELLOW}(Build & start containers, preserve data)${NC}"
     echo ""
-    echo -e "  ${BOLD}2)${NC} Display URLs for testing"
+    echo -e "  ${BOLD}2)${NC} Full reset (wipe everything)"
+    echo -e "     ${RED}(Delete all data, rebuild from scratch)${NC}"
+    echo ""
+    echo -e "  ${BOLD}3)${NC} Display URLs for testing"
     echo -e "     ${YELLOW}(Show all available endpoints with status)${NC}"
     echo ""
-    echo -e "  ${BOLD}3)${NC} Show container status"
+    echo -e "  ${BOLD}4)${NC} Show container status"
     echo -e "     ${YELLOW}(Display running containers)${NC}"
     echo ""
-    echo -e "  ${BOLD}4)${NC} Stop all containers"
+    echo -e "  ${BOLD}5)${NC} Stop all containers"
     echo -e "     ${YELLOW}(Shut down all services)${NC}"
     echo ""
-    echo -e "  ${BOLD}5)${NC} View logs"
+    echo -e "  ${BOLD}6)${NC} View logs"
     echo -e "     ${YELLOW}(Follow container logs)${NC}"
     echo ""
     echo -e "  ${BOLD}0)${NC} Exit"
@@ -481,7 +537,7 @@ main() {
 
     while true; do
         show_menu
-        read -p "Enter your choice [0-5]: " choice
+        read -p "Enter your choice [0-6]: " choice
 
         case $choice in
             1)
@@ -489,19 +545,27 @@ main() {
                     setup_environment
                     start_containers
                     echo ""
-                    print_info "Environment is ready! Use option 2 to see available URLs."
+                    print_info "Environment is ready! Use option 3 to see available URLs."
                 fi
                 ;;
             2)
-                display_urls
+                if check_prerequisites; then
+                    setup_environment
+                    full_reset
+                    echo ""
+                    print_info "Fresh environment ready! Use option 3 to see available URLs."
+                fi
                 ;;
             3)
-                show_container_status
+                display_urls
                 ;;
             4)
-                stop_containers
+                show_container_status
                 ;;
             5)
+                stop_containers
+                ;;
+            6)
                 view_logs
                 ;;
             0)
@@ -511,7 +575,7 @@ main() {
                 exit 0
                 ;;
             *)
-                print_warning "Invalid option. Please enter 0-5."
+                print_warning "Invalid option. Please enter 0-6."
                 ;;
         esac
 

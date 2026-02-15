@@ -234,6 +234,7 @@ class TimelineBuilder:
         self.bpm = self.beat_config.get("bpm")
         self.beats_per_cut = self.beat_config.get("beats_per_cut")
         self.audio_duration_ms = self.beat_config.get("audio_duration_ms")
+        self.target_duration_ms = self.beat_config.get("target_duration_ms")  # For non-audio mode
         self.loop_media = self.beat_config.get("loop_media", False)
 
         # Calculate beat-based durations if configured
@@ -250,7 +251,8 @@ class TimelineBuilder:
         Build timeline - dispatches to beat-synced or natural duration mode.
 
         Beat-synced mode: media loops to fill audio duration with cuts on beat boundaries
-        Natural mode: each media asset appears exactly once
+        Fixed duration mode: distribute target duration evenly across media
+        Natural mode: each media asset appears exactly once with default durations
 
         Returns:
             dict: Complete EDL structure ready for JSON serialization
@@ -264,6 +266,10 @@ class TimelineBuilder:
         # Use beat-synced mode if we have all required beat configuration
         if self.segment_duration_ms and self.audio_duration_ms and self.loop_media:
             return self._build_beat_synced()
+
+        # Use fixed duration mode if target_duration_ms is set (no audio)
+        if self.target_duration_ms:
+            return self._build_fixed_duration()
 
         # Fall back to natural duration mode
         return self._build_natural_duration()
@@ -331,6 +337,85 @@ class TimelineBuilder:
             "transition_type": self.transition_type,
             "transition_duration_ms": self.transition_duration_ms,
             "ken_burns_enabled": self.ken_burns_enabled,
+            "total_duration_ms": total_duration_ms,
+            "segment_count": len(segments),
+            "segments": [seg.to_dict() for seg in segments],
+        }
+
+        return edl
+
+    def _build_fixed_duration(self) -> dict:
+        """
+        Build timeline with fixed total duration (no audio, user-specified length).
+
+        Distributes target_duration_ms evenly across all media assets.
+
+        Returns:
+            dict: Complete EDL structure ready for JSON serialization
+        """
+        segments = []
+        timeline_position = 0
+        num_assets = len(self.media_assets)
+
+        # Calculate duration per segment (evenly distributed)
+        duration_per_segment = self.target_duration_ms // num_assets
+
+        for i, asset in enumerate(self.media_assets):
+            # Last segment gets any remaining time
+            if i == num_assets - 1:
+                duration_ms = self.target_duration_ms - timeline_position
+            else:
+                duration_ms = duration_per_segment
+
+            # Calculate Ken Burns effect for images
+            ken_burns = None
+            effects = None
+            if asset.media_type == "image" and self.ken_burns_enabled:
+                ken_burns, effects = self._calculate_ken_burns(duration_ms)
+
+            # For videos, cap source duration at actual video length
+            source_out_ms = duration_ms
+            if asset.media_type == "video" and asset.duration_ms:
+                source_out_ms = min(duration_ms, asset.duration_ms)
+
+            # Create segment
+            segment = EDLSegment(
+                segment_index=i,
+                media_asset_id=asset.id,
+                media_type=asset.media_type,
+                timeline_in_ms=timeline_position,
+                timeline_out_ms=timeline_position + duration_ms,
+                render_duration_ms=duration_ms,
+                source_in_ms=0,
+                source_out_ms=source_out_ms,
+                ken_burns=ken_burns,
+                transition_in=None,
+                transition_out=None,
+                effects=effects,
+            )
+            segments.append(segment)
+            timeline_position += duration_ms
+
+        # Apply transition overlap adjustments if not using cuts
+        if self.transition_type != "cut":
+            segments = self._apply_transition_overlaps(segments)
+
+        # Compute EDL hash
+        edl_hash = self._compute_edl_hash(segments)
+
+        # Build final EDL structure
+        total_duration_ms = segments[-1].timeline_out_ms if segments else 0
+
+        edl = {
+            "version": "1.0",
+            "project_id": self.project_id,
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "edl_hash": f"sha256:{edl_hash}",
+            "transition_type": self.transition_type,
+            "transition_duration_ms": self.transition_duration_ms,
+            "ken_burns_enabled": self.ken_burns_enabled,
+            "fixed_duration": True,
+            "target_duration_ms": self.target_duration_ms,
             "total_duration_ms": total_duration_ms,
             "segment_count": len(segments),
             "segments": [seg.to_dict() for seg in segments],

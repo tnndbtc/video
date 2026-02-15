@@ -17,7 +17,8 @@ python-multipart = "^0.0.6"
 # Database
 sqlalchemy = "^2.0.25"
 alembic = "^1.13.1"
-aiosqlite = "^0.19.0"
+asyncpg = "^0.29.0"  # PostgreSQL async driver
+aiosqlite = "^0.19.0"  # Kept for tests (faster in-memory SQLite)
 
 # Authentication
 python-jose = {extras = ["cryptography"], version = "^3.3.0"}

@@ -376,6 +376,13 @@ async def start_render(
         await db.flush()
 
     except Exception as e:
+        # Log the full exception for debugging
+        import logging
+        import traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to enqueue {request.type} render job: {e}")
+        logger.error(traceback.format_exc())
+
         # If enqueueing fails, mark the job as failed
         render_job.status = "failed"
         render_job.error_message = f"Failed to enqueue render job: {str(e)}"
@@ -385,7 +392,7 @@ async def start_render(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "error": "internal_error",
-                "message": "Failed to enqueue render job",
+                "message": f"Failed to enqueue render job: {str(e)}",
             },
         )
 

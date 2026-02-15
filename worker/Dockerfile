@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for running FFmpeg jobs (security)
-RUN useradd --create-home --shell /bin/bash worker
+# Use explicit UID 1000 for consistency with backend
+RUN useradd --create-home --shell /bin/bash --uid 1000 worker
 
 # Install Poetry, Cython, and numpy (required for building madmom)
 RUN pip install poetry cython numpy && \

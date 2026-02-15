@@ -45,7 +45,7 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = Field(
-        default="sqlite+aiosqlite:///./beatstitch.db",
+        default="postgresql+asyncpg://beatstitch:beatstitch@localhost:5432/beatstitch",
         description="Database connection URL",
     )
 

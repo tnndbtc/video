@@ -16,12 +16,26 @@ services:
       - ./frontend/src:/app/src:ro
       - ./frontend/public:/app/public:ro
 
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=beatstitch
+      - POSTGRES_PASSWORD=beatstitch
+      - POSTGRES_DB=beatstitch
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beatstitch"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     build: ./backend
     ports:
       - "8080:8000"  # External port 8080 -> internal 8000
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:////data/db/beatstitch.db
+      - DATABASE_URL=postgresql+asyncpg://beatstitch:beatstitch@postgres:5432/beatstitch
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - STORAGE_PATH=/data
@@ -29,21 +43,28 @@ services:
     volumes:
       - beatstitch-data:/data
     depends_on:
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     # mem_limit works in Compose v2 (not Swarm)
     # Uncomment if needed: mem_limit: 2g
 
   worker:
     build: ./worker
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:////data/db/beatstitch.db
+      - DATABASE_URL=postgresql+asyncpg://beatstitch:beatstitch@postgres:5432/beatstitch
       - REDIS_URL=redis://redis:6379/0
       - STORAGE_PATH=/data
     volumes:
       - beatstitch-data:/data
     depends_on:
-      - redis
-      - backend
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      backend:
+        condition: service_started
     # Memory limits in standard Compose (not Swarm):
     # mem_limit: 4g
     #
@@ -61,5 +82,6 @@ services:
     command: redis-server --appendonly yes
 
 volumes:
+  postgres-data:
   beatstitch-data:
   redis-data:

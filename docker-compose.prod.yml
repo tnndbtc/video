@@ -92,6 +92,36 @@ services:
       - beatstitch-network
 
   # ===========================================================================
+  # PostgreSQL Database
+  # ===========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: beatstitch-postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-beatstitch}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-beatstitch}
+      - POSTGRES_DB=${POSTGRES_DB:-beatstitch}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-beatstitch}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    networks:
+      - beatstitch-network
+
+  # ===========================================================================
   # Backend API
   # ===========================================================================
   # FastAPI application serving the REST API
@@ -101,7 +131,7 @@ services:
     container_name: beatstitch-backend
     # No ports exposed - accessed through Caddy
     environment:
-      - DATABASE_URL=${DATABASE_URL:-sqlite:////data/db/beatstitch.db}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://beatstitch:beatstitch@postgres:5432/beatstitch}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - SECRET_KEY=${SECRET_KEY}
       - STORAGE_PATH=${STORAGE_PATH:-/data}
@@ -111,6 +141,8 @@ services:
     volumes:
       - beatstitch_data:/data
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
@@ -140,13 +172,15 @@ services:
       context: ./worker
     container_name: beatstitch-worker
     environment:
-      - DATABASE_URL=${DATABASE_URL:-sqlite:////data/db/beatstitch.db}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://beatstitch:beatstitch@postgres:5432/beatstitch}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - STORAGE_PATH=${STORAGE_PATH:-/data}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - beatstitch_data:/data
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
       backend:
@@ -203,7 +237,12 @@ services:
 # Volumes
 # =============================================================================
 volumes:
-  # Application data: uploads, derived files, outputs, database
+  # PostgreSQL database
+  postgres_data:
+    name: beatstitch_postgres_data
+    driver: local
+
+  # Application data: uploads, derived files, outputs
   beatstitch_data:
     name: beatstitch_data
     driver: local

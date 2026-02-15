@@ -28,7 +28,7 @@ Pillow = "^10.2.0"
 
 # Database access (shared with backend for job results)
 sqlalchemy = "^2.0.25"
-aiosqlite = "^0.19.0"
+psycopg2-binary = "^2.9.9"  # PostgreSQL sync driver
 
 # Utilities
 pydantic = "^2.5.3"

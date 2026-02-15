@@ -17,13 +17,13 @@ from sqlalchemy.orm import Session, sessionmaker, DeclarativeBase
 def get_database_url() -> str:
     """
     Get database URL from environment variable.
-    Converts async SQLite URL to sync URL if needed.
+    Converts async PostgreSQL URL to sync URL if needed.
     """
-    url = os.environ.get("DATABASE_URL", "sqlite:////data/db/beatstitch.db")
+    url = os.environ.get("DATABASE_URL", "postgresql://beatstitch:beatstitch@postgres:5432/beatstitch")
 
-    # Convert async SQLite URL to sync URL
-    if url.startswith("sqlite+aiosqlite://"):
-        url = url.replace("sqlite+aiosqlite://", "sqlite://")
+    # Convert async PostgreSQL URL to sync URL
+    if "+asyncpg" in url:
+        url = url.replace("postgresql+asyncpg", "postgresql")
 
     return url
 

@@ -966,11 +966,16 @@ def render_video(project_id: str, job_type: str) -> dict:
         # Build beat_config from audio track + render_plan
         beat_config = None
         audio_track = db.query(AudioTrack).filter_by(project_id=project_id).first()
+
+        # Get target duration from render_plan (works with or without audio)
+        target_duration_ms = None
+        if render_plan and render_plan.get("video_length_seconds"):
+            target_duration_ms = render_plan["video_length_seconds"] * 1000
+            logger.info(f"Target duration from render_plan: {target_duration_ms}ms")
+
         if audio_track and audio_track.bpm and render_plan:
-            # Use video_length_seconds from render_plan if provided, else audio duration
-            if render_plan.get("video_length_seconds"):
-                target_duration_ms = render_plan["video_length_seconds"] * 1000
-            else:
+            # Beat-synced mode with audio
+            if not target_duration_ms:
                 target_duration_ms = audio_track.duration_ms
 
             beat_config = {
@@ -982,6 +987,13 @@ def render_video(project_id: str, job_type: str) -> dict:
             logger.info(f"Beat-synced mode: bpm={audio_track.bpm}, "
                        f"beats_per_cut={beat_config['beats_per_cut']}, "
                        f"target_duration_ms={target_duration_ms}")
+        elif target_duration_ms:
+            # No audio but have target duration - use simple duration mode
+            beat_config = {
+                "target_duration_ms": target_duration_ms,
+                "loop_media": False,
+            }
+            logger.info(f"Fixed duration mode (no audio): target_duration_ms={target_duration_ms}")
 
         # Build timeline
         builder = TimelineBuilder(

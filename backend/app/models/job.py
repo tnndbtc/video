@@ -107,7 +107,7 @@ class RenderJob(Base):
 
     # RQ job tracking
     rq_job_id: Mapped[Optional[str]] = mapped_column(
-        String(50),
+        String(100),
         nullable=True,
         index=True,
         doc="Redis Queue job ID"

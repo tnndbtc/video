@@ -1,7 +1,7 @@
 """Add timeline preview settings to project
 
 Revision ID: 004
-Revises: 20260213_003_make_dimensions_nullable
+Revises: 003
 Create Date: 2026-02-14
 
 """
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '20260214_004'
-down_revision = '20260213_003_make_dimensions_nullable'
+revision = '004'
+down_revision = '003'
 branch_labels = None
 depends_on = None
 
