@@ -187,7 +187,8 @@ export function AudioUploader({ projectId, currentAudio }: AudioUploaderProps) {
 
   // Show current audio info if exists
   if (currentAudio) {
-    const audioUrl = `${API_BASE_URL}/projects/${projectId}/audio/stream`;
+    // Add audio ID as cache-buster to ensure fresh audio after replacement
+    const audioUrl = `${API_BASE_URL}/projects/${projectId}/audio/stream?t=${currentAudio.id}`;
 
     return (
       <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
