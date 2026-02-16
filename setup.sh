@@ -139,25 +139,13 @@ check_prerequisites() {
 setup_environment() {
     print_header "Setting Up Environment"
 
-    # Check if .env exists
-    if [ -f .env ]; then
-        print_info ".env file already exists"
-        echo ""
-        read -p "Do you want to recreate it from .env.example? (y/N): " recreate
-        if [[ "$recreate" =~ ^[Yy]$ ]]; then
-            cp .env.example .env
-            print_success "Created new .env from .env.example"
-        else
-            print_info "Keeping existing .env file"
-        fi
+    # Always recreate .env from .env.example
+    if [ -f .env.example ]; then
+        cp .env.example .env
+        print_success "Created .env from .env.example"
     else
-        if [ -f .env.example ]; then
-            cp .env.example .env
-            print_success "Created .env from .env.example"
-        else
-            print_error ".env.example not found!"
-            return 1
-        fi
+        print_error ".env.example not found!"
+        return 1
     fi
 
     # Generate secure SECRET_KEY if it's still the default

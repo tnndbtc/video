@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { MediaAsset } from '../types/media';
 import { MediaCard } from './MediaCard';
+import { DND_MEDIA_ID, DND_DEBUG } from '../utils/dndTypes';
 
 interface MediaGridProps {
   projectId: string;
@@ -39,8 +40,11 @@ export function MediaGrid({ projectId: _projectId, media, onReorder, onDelete }:
   const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   const handleDragStart = useCallback((e: React.DragEvent<HTMLDivElement>, id: string) => {
+    if (DND_DEBUG) console.log('[MediaGrid] Drag START - mediaId:', id);
     setDraggedId(id);
-    e.dataTransfer.effectAllowed = 'copyMove';
+    e.dataTransfer.effectAllowed = 'copy';
+    // Set both custom MIME type and text/plain for Safari compatibility
+    e.dataTransfer.setData(DND_MEDIA_ID, id);
     e.dataTransfer.setData('text/plain', id);
     // Set drag image for better visual feedback
     if (e.currentTarget) {

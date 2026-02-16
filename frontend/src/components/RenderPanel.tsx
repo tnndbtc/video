@@ -224,7 +224,7 @@ function RenderSection({
  * Main RenderPanel component
  * Timeline is auto-generated during render - we only need to check for media.
  */
-export function RenderPanel({ projectId, hasMedia, ruleText, videoLengthSeconds, timelineMediaIds, savedTimelineMediaIds }: RenderPanelProps) {
+export function RenderPanel({ projectId, hasMedia, ruleText, videoLengthSeconds, timelineMediaIds: _timelineMediaIds, savedTimelineMediaIds: _savedTimelineMediaIds }: RenderPanelProps) {
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-700 p-6">
       {/* Panel header */}
