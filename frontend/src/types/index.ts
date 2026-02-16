@@ -69,3 +69,34 @@ export type {
   TimelineStatus,
   GenerateTimelineResponse,
 } from './timeline';
+
+// Re-export EditRequest (EDL v1) types
+export type {
+  EffectPreset,
+  TransitionType,
+  RepeatMode,
+  FillBehavior,
+  DurationBeats,
+  DurationMs,
+  DurationNatural,
+  Duration,
+  SourceTrim,
+  Transition,
+  OutputSettings,
+  AudioSettings,
+  DefaultSettings,
+  RepeatSettings,
+  TimelineSegment as EditRequestTimelineSegment,
+  EditRequest,
+  ValidationErrorDetail,
+  ComputedInfo,
+  EditRequestValidationResult,
+  EditRequestSaveResponse,
+} from './editRequest';
+
+export {
+  isDurationBeats,
+  isDurationMs,
+  isDurationNatural,
+  calculateDurationMs,
+} from './editRequest';

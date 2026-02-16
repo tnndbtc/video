@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "output": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "timeline": [
+    {
+      "asset_id": "img_001",
+      "type": "image",
+      "duration": {
+        "mode": "ms",
+        "value": -500
+      }
+    },
+    {
+      "asset_id": "vid_001",
+      "type": "video",
+      "transition_in": {
+        "type": "crossfade",
+        "duration_ms": null
+      },
+      "source": {
+        "in_ms": -100,
+        "out_ms": 5000
+      }
+    },
+    {
+      "asset_id": "img_002",
+      "type": "image"
+    }
+  ]
+}

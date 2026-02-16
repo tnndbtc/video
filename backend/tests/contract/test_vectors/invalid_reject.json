@@ -1,0 +1,13 @@
+{
+  "version": "2.0",
+  "timeline": [],
+  "segments": [
+    {
+      "type": "audio",
+      "file": "music.mp3"
+    },
+    {
+      "type": "image"
+    }
+  ]
+}

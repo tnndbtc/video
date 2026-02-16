@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from .auth import router as auth_router
 from .audio import router as audio_router
+from .edit_request import router as edit_request_router
 from .media import router as media_router
 from .projects import router as projects_router
 from .timeline import router as timeline_router
@@ -34,4 +35,16 @@ api_router.include_router(timeline_router, prefix="/projects", tags=["timeline"]
 # Include render routes (nested under projects)
 api_router.include_router(render_router, prefix="/projects", tags=["render"])
 
-__all__ = ["api_router", "auth_router", "audio_router", "media_router", "projects_router", "timeline_router", "render_router"]
+# Include EditRequest (EDL v1) routes (nested under projects)
+api_router.include_router(edit_request_router, prefix="/projects", tags=["edl"])
+
+__all__ = [
+    "api_router",
+    "auth_router",
+    "audio_router",
+    "edit_request_router",
+    "media_router",
+    "projects_router",
+    "timeline_router",
+    "render_router",
+]

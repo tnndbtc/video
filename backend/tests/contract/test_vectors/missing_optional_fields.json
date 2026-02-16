@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "timeline": [
+    {
+      "asset_id": "asset_001",
+      "type": "image"
+    },
+    {
+      "asset_id": "asset_002",
+      "type": "video"
+    }
+  ]
+}

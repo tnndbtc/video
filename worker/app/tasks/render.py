@@ -949,88 +949,119 @@ def render_video(project_id: str, job_type: str) -> dict:
             except Exception as e:
                 logger.warning(f"Failed to load render_plan.json: {e}")
 
-        # Load media assets - use timeline_media_ids if provided in render_plan
-        timeline_media_ids = render_plan.get("timeline_media_ids") if render_plan else None
+        # Check if we should use EditRequest v1 mode
+        use_edit_request = render_plan and render_plan.get("use_edit_request", False)
+        edit_request_path = STORAGE_ROOT / "derived" / project_id / "edit_request.json"
 
-        if timeline_media_ids:
-            # Load only the specified media in the specified order
-            all_media = (
-                db.query(MediaAsset)
-                .filter_by(project_id=project_id, processing_status="ready")
-                .all()
-            )
-            media_by_id = {m.id: m for m in all_media}
-            media_assets = [media_by_id[mid] for mid in timeline_media_ids if mid in media_by_id]
-            logger.info(f"Using timeline_media_ids: {len(media_assets)} media items")
+        if use_edit_request and edit_request_path.exists():
+            # EditRequest v1 mode: load and convert edit_request.json
+            logger.info("Using EditRequest v1 mode")
+            update_job_progress(5, "Loading EditRequest...")
+
+            try:
+                with open(edit_request_path) as f:
+                    edit_request = json.load(f)
+
+                # Import and use the converter
+                from .edit_request_converter import EditRequestToEDLConverter
+
+                converter = EditRequestToEDLConverter(db, MediaAsset, AudioTrack)
+                edl = converter.convert(edit_request, project_id)
+
+                logger.info(f"Converted EditRequest to EDL: segments={edl['segment_count']}")
+            except Exception as e:
+                logger.error(f"Failed to convert EditRequest: {e}")
+                raise ValueError(f"Failed to convert EditRequest: {e}")
+
+            # Fetch audio track for render (needed for audio path resolution)
+            audio_track = db.query(AudioTrack).filter_by(project_id=project_id).first()
         else:
-            # Fall back to all media sorted by sort_order
-            media_assets = (
-                db.query(MediaAsset)
-                .filter_by(project_id=project_id, processing_status="ready")
-                .order_by(MediaAsset.sort_order)
-                .all()
+            # Traditional mode: auto-generate timeline
+            # Load media assets - use timeline_media_ids if provided in render_plan
+            timeline_media_ids = render_plan.get("timeline_media_ids") if render_plan else None
+
+            if timeline_media_ids:
+                # Load only the specified media in the specified order
+                all_media = (
+                    db.query(MediaAsset)
+                    .filter_by(project_id=project_id, processing_status="ready")
+                    .all()
+                )
+                media_by_id = {m.id: m for m in all_media}
+                media_assets = [media_by_id[mid] for mid in timeline_media_ids if mid in media_by_id]
+                logger.info(f"Using timeline_media_ids: {len(media_assets)} media items")
+            else:
+                # Fall back to all media sorted by sort_order
+                media_assets = (
+                    db.query(MediaAsset)
+                    .filter_by(project_id=project_id, processing_status="ready")
+                    .order_by(MediaAsset.sort_order)
+                    .all()
+                )
+
+            if not media_assets:
+                raise ValueError(f"No processed media assets found for project {project_id}")
+
+            update_job_progress(5, "Building timeline...")
+
+            # Import timeline builder from timeline module
+            from .timeline import TimelineBuilder, save_edl, PAN_DIRECTIONS
+
+            # Extract project settings
+            project_settings = {
+                "transition_type": project.transition_type,
+                "transition_duration_ms": project.transition_duration_ms,
+                "ken_burns_enabled": project.ken_burns_enabled,
+                "output_width": project.output_width,
+                "output_height": project.output_height,
+                "output_fps": project.output_fps,
+            }
+
+            # Build beat_config from audio track + render_plan
+            beat_config = None
+            audio_track = db.query(AudioTrack).filter_by(project_id=project_id).first()
+
+            # Get target duration from render_plan (works with or without audio)
+            target_duration_ms = None
+            if render_plan and render_plan.get("video_length_seconds"):
+                target_duration_ms = render_plan["video_length_seconds"] * 1000
+                logger.info(f"Target duration from render_plan: {target_duration_ms}ms")
+
+            if audio_track and audio_track.bpm and render_plan:
+                # Beat-synced mode with audio
+                if not target_duration_ms:
+                    target_duration_ms = audio_track.duration_ms
+
+                beat_config = {
+                    "bpm": audio_track.bpm,
+                    "beats_per_cut": render_plan.get("beats_per_cut", 8),
+                    "audio_duration_ms": target_duration_ms,
+                    "loop_media": render_plan.get("loop_media", True),
+                }
+                logger.info(f"Beat-synced mode: bpm={audio_track.bpm}, "
+                           f"beats_per_cut={beat_config['beats_per_cut']}, "
+                           f"target_duration_ms={target_duration_ms}")
+            elif target_duration_ms:
+                # No audio but have target duration - use simple duration mode
+                beat_config = {
+                    "target_duration_ms": target_duration_ms,
+                    "loop_media": False,
+                }
+                logger.info(f"Fixed duration mode (no audio): target_duration_ms={target_duration_ms}")
+
+            # Build timeline
+            builder = TimelineBuilder(
+                project_id=project_id,
+                media_assets=media_assets,
+                project_settings=project_settings,
+                beat_config=beat_config,
             )
-
-        if not media_assets:
-            raise ValueError(f"No processed media assets found for project {project_id}")
-
-        update_job_progress(5, "Building timeline...")
-
-        # Import timeline builder from timeline module
-        from .timeline import TimelineBuilder, save_edl, PAN_DIRECTIONS
-
-        # Extract project settings
-        project_settings = {
-            "transition_type": project.transition_type,
-            "transition_duration_ms": project.transition_duration_ms,
-            "ken_burns_enabled": project.ken_burns_enabled,
-            "output_width": project.output_width,
-            "output_height": project.output_height,
-            "output_fps": project.output_fps,
-        }
-
-        # Build beat_config from audio track + render_plan
-        beat_config = None
-        audio_track = db.query(AudioTrack).filter_by(project_id=project_id).first()
-
-        # Get target duration from render_plan (works with or without audio)
-        target_duration_ms = None
-        if render_plan and render_plan.get("video_length_seconds"):
-            target_duration_ms = render_plan["video_length_seconds"] * 1000
-            logger.info(f"Target duration from render_plan: {target_duration_ms}ms")
-
-        if audio_track and audio_track.bpm and render_plan:
-            # Beat-synced mode with audio
-            if not target_duration_ms:
-                target_duration_ms = audio_track.duration_ms
-
-            beat_config = {
-                "bpm": audio_track.bpm,
-                "beats_per_cut": render_plan.get("beats_per_cut", 8),
-                "audio_duration_ms": target_duration_ms,
-                "loop_media": render_plan.get("loop_media", True),
-            }
-            logger.info(f"Beat-synced mode: bpm={audio_track.bpm}, "
-                       f"beats_per_cut={beat_config['beats_per_cut']}, "
-                       f"target_duration_ms={target_duration_ms}")
-        elif target_duration_ms:
-            # No audio but have target duration - use simple duration mode
-            beat_config = {
-                "target_duration_ms": target_duration_ms,
-                "loop_media": False,
-            }
-            logger.info(f"Fixed duration mode (no audio): target_duration_ms={target_duration_ms}")
-
-        # Build timeline
-        builder = TimelineBuilder(
-            project_id=project_id,
-            media_assets=media_assets,
-            project_settings=project_settings,
-            beat_config=beat_config,
-        )
-        edl = builder.build()
+            edl = builder.build()
 
         update_job_progress(10, "Saving timeline...")
+
+        # Import save_edl here (used by both EditRequest and traditional modes)
+        from .timeline import save_edl
 
         # Save EDL to filesystem
         edl_relative_path = save_edl(edl, project_id)

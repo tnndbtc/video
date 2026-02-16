@@ -1,0 +1,70 @@
+{
+  "version": "1.0",
+  "project_id": "proj_abc123",
+  "output": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "audio": {
+    "asset_id": "audio_001",
+    "bpm": 120,
+    "start_offset_ms": 0,
+    "end_at_audio_end": true,
+    "trim_end_ms": 0
+  },
+  "defaults": {
+    "beats_per_cut": 8,
+    "transition": {
+      "type": "crossfade",
+      "duration_ms": 500
+    },
+    "effect": "slow_zoom_in"
+  },
+  "timeline": [
+    {
+      "asset_id": "img_001",
+      "type": "image",
+      "duration": {
+        "mode": "beats",
+        "count": 8
+      }
+    },
+    {
+      "asset_id": "img_002",
+      "type": "image",
+      "effect": "pan_left"
+    },
+    {
+      "asset_id": "vid_001",
+      "type": "video",
+      "duration": {
+        "mode": "beats",
+        "count": 16
+      },
+      "source": {
+        "in_ms": 1000,
+        "out_ms": 10000
+      }
+    },
+    {
+      "asset_id": "img_003",
+      "type": "image",
+      "transition_in": {
+        "type": "crossfade",
+        "duration_ms": 750
+      }
+    },
+    {
+      "asset_id": "vid_002",
+      "type": "video",
+      "duration": {
+        "mode": "natural"
+      }
+    }
+  ],
+  "repeat": {
+    "mode": "repeat_all",
+    "fill_behavior": "black"
+  }
+}

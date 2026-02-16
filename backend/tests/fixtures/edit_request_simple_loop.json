@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "audio": {
+    "asset_id": "audio_001",
+    "end_at_audio_end": true
+  },
+  "defaults": {
+    "beats_per_cut": 8,
+    "effect": "slow_zoom_in"
+  },
+  "timeline": [
+    {
+      "asset_id": "img_001",
+      "type": "image"
+    },
+    {
+      "asset_id": "img_002",
+      "type": "image"
+    },
+    {
+      "asset_id": "vid_001",
+      "type": "video",
+      "duration": {
+        "mode": "beats",
+        "count": 16
+      }
+    }
+  ],
+  "repeat": {
+    "mode": "repeat_all"
+  }
+}

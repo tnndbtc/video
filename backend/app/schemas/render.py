@@ -10,6 +10,8 @@ from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from .edit_request import EditRequest
+
 
 # --- Request Schemas ---
 
@@ -30,6 +32,11 @@ class RenderRequest(BaseModel):
         gt=0,
         le=600,
         description="Target video length in seconds (max 10 minutes)",
+    )
+    edit_request: Optional[EditRequest] = Field(
+        None,
+        description="Optional EditRequest (EDL v1) to use instead of auto-generated timeline. "
+                    "When provided, rule_text and video_length_seconds are ignored.",
     )
     # Note: edl_hash removed - timeline is now auto-generated during render
 

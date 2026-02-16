@@ -318,40 +318,68 @@ async def start_render(
 
     # 4b. Build render_plan.json with timeline settings
     # Include timeline_media_ids from project, rule_text, and video_length_seconds
+    import logging
+    logger = logging.getLogger(__name__)
+
     try:
-        if request.rule_text:
-            render_plan = parse_user_rule(request.rule_text)
-        else:
-            render_plan = {}
-
-        # Add video_length_seconds to render plan
-        if request.video_length_seconds:
-            render_plan["video_length_seconds"] = request.video_length_seconds
-
-        # Add timeline_media_ids from project (the user's timeline preview order)
-        # DEBUG: Log what we're reading from project
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.warning(f"DEBUG: project.timeline_media_ids = {project.timeline_media_ids}")
-
-        if project.timeline_media_ids:
-            render_plan["timeline_media_ids"] = project.timeline_media_ids
-            logger.warning(f"DEBUG: Added timeline_media_ids to render_plan: {project.timeline_media_ids}")
-        else:
-            logger.warning("DEBUG: No timeline_media_ids found on project!")
-
-        # Save render_plan to filesystem
         storage_root = get_storage_root()
         derived_dir = storage_root / "derived" / project_id
         derived_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check if edit_request is provided (EditRequest v1 mode)
+        if request.edit_request:
+            # Validate the edit_request
+            from app.services.edit_request_validator import EditRequestValidator
+            validator = EditRequestValidator(db)
+            validation_result = await validator.validate(request.edit_request, project_id)
+
+            if not validation_result.valid:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error": "edit_request_validation_failed",
+                        "message": "EditRequest validation failed",
+                        "validation": validation_result.model_dump(),
+                    },
+                )
+
+            # Save edit_request.json
+            edit_request_path = derived_dir / "edit_request.json"
+            with open(edit_request_path, "w") as f:
+                json.dump(request.edit_request.model_dump(exclude_none=True), f, indent=2)
+            logger.info(f"Saved edit_request.json for project {project_id}")
+
+            # Create render_plan that tells worker to use edit_request
+            render_plan = {
+                "use_edit_request": True,
+            }
+        else:
+            # Traditional mode: use rule_text/video_length_seconds
+            if request.rule_text:
+                render_plan = parse_user_rule(request.rule_text)
+            else:
+                render_plan = {}
+
+            # Add video_length_seconds to render plan
+            if request.video_length_seconds:
+                render_plan["video_length_seconds"] = request.video_length_seconds
+
+            # Add timeline_media_ids from project (the user's timeline preview order)
+            logger.debug(f"project.timeline_media_ids = {project.timeline_media_ids}")
+
+            if project.timeline_media_ids:
+                render_plan["timeline_media_ids"] = project.timeline_media_ids
+
+        # Save render_plan to filesystem
         render_plan_path = derived_dir / "render_plan.json"
         with open(render_plan_path, "w") as f:
             json.dump(render_plan, f, indent=2)
-        logger.warning(f"DEBUG: Saved render_plan.json: {render_plan}")
+        logger.debug(f"Saved render_plan.json: {render_plan}")
+    except HTTPException:
+        raise
     except Exception as e:
         # If parsing fails, continue without render plan (will use natural duration)
-        import logging
-        logging.getLogger(__name__).warning(f"DEBUG: Exception in render_plan: {e}")
+        logger.warning(f"Exception in render_plan processing: {e}")
         pass
 
     # 5. Enqueue render task (no edl_hash needed - timeline generated during render)

@@ -1,0 +1,48 @@
+{
+  "version": "1.0",
+  "output": {
+    "width": 1280,
+    "height": 720,
+    "fps": 24
+  },
+  "defaults": {
+    "beats_per_cut": 4,
+    "transition": {
+      "type": "cut",
+      "duration_ms": 0
+    }
+  },
+  "timeline": [
+    {
+      "asset_id": "img_001",
+      "type": "image",
+      "duration": {
+        "mode": "ms",
+        "value": 3000
+      },
+      "effect": "pan_left"
+    },
+    {
+      "asset_id": "img_002",
+      "type": "image",
+      "duration": {
+        "mode": "ms",
+        "value": 4500
+      },
+      "effect": "pan_right"
+    },
+    {
+      "asset_id": "img_003",
+      "type": "image",
+      "duration": {
+        "mode": "ms",
+        "value": 2500
+      },
+      "effect": "diagonal_push"
+    }
+  ],
+  "repeat": {
+    "mode": "stop",
+    "fill_behavior": "freeze_last"
+  }
+}

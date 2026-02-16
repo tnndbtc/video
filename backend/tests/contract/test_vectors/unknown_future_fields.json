@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "future_feature": true,
+  "v2_settings": {
+    "ai_mode": "enhanced",
+    "smart_cuts": true
+  },
+  "output": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "hdr_enabled": true
+  },
+  "defaults": {
+    "beats_per_cut": 8,
+    "transition": {
+      "type": "crossfade",
+      "duration_ms": 500
+    },
+    "auto_enhance": true
+  },
+  "timeline": [
+    {
+      "asset_id": "img_001",
+      "type": "image",
+      "new_effect": "hologram",
+      "ai_upscale": true
+    },
+    {
+      "asset_id": "vid_001",
+      "type": "video",
+      "duration": {
+        "mode": "beats",
+        "count": 8
+      },
+      "neural_stabilization": {
+        "enabled": true,
+        "strength": 0.8
+      }
+    }
+  ],
+  "repeat": {
+    "mode": "repeat_all"
+  },
+  "experimental_features": ["feature_a", "feature_b"]
+}

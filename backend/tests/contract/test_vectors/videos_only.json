@@ -1,0 +1,56 @@
+{
+  "version": "1.0",
+  "output": {
+    "width": 3840,
+    "height": 2160,
+    "fps": 60
+  },
+  "defaults": {
+    "beats_per_cut": 16,
+    "transition": {
+      "type": "crossfade",
+      "duration_ms": 300
+    },
+    "effect": "subtle_drift"
+  },
+  "timeline": [
+    {
+      "asset_id": "vid_001",
+      "type": "video",
+      "duration": {
+        "mode": "natural"
+      },
+      "source": {
+        "in_ms": 0,
+        "out_ms": 15000
+      }
+    },
+    {
+      "asset_id": "vid_002",
+      "type": "video",
+      "duration": {
+        "mode": "natural"
+      },
+      "source": {
+        "in_ms": 5000,
+        "out_ms": 20000
+      },
+      "effect": "slow_zoom_out"
+    },
+    {
+      "asset_id": "vid_003",
+      "type": "video",
+      "duration": {
+        "mode": "natural"
+      },
+      "source": {
+        "in_ms": 2500,
+        "out_ms": null
+      }
+    }
+  ],
+  "repeat": {
+    "mode": "repeat_last",
+    "fill_behavior": "black"
+  }
+}
