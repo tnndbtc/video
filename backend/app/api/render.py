@@ -476,6 +476,7 @@ async def get_render_status_by_type(
         progress_message=progress_message,
         output_url=output_url,
         file_size=render_job.file_size,
+        duration_seconds=render_job.duration_seconds,
         error=render_job.error_message,
         created_at=render_job.created_at,
         started_at=render_job.started_at,
@@ -549,6 +550,7 @@ async def get_render_job_status(
         progress_message=progress_message,
         output_url=output_url,
         file_size=render_job.file_size,
+        duration_seconds=render_job.duration_seconds,
         error=render_job.error_message,
         created_at=render_job.created_at,
         started_at=render_job.started_at,
@@ -633,5 +635,9 @@ async def download_render(
         path=str(file_path),
         media_type="video/mp4",
         filename=filename,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        stat_result=file_path.stat(),
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Accept-Ranges": "bytes",
+        },
     )

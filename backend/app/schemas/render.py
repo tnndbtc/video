@@ -74,6 +74,9 @@ class RenderJobStatus(BaseModel):
     file_size: Optional[int] = Field(
         None, description="Output file size in bytes when complete"
     )
+    duration_seconds: Optional[float] = Field(
+        None, description="Output video duration in seconds when complete"
+    )
     error: Optional[str] = Field(None, description="Error message if failed")
     created_at: Optional[datetime] = Field(None, description="When job was created")
     started_at: Optional[datetime] = Field(

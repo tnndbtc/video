@@ -54,7 +54,9 @@ export function RenderResult({
 
         const blob = await response.blob();
         if (!cancelled) {
-          const url = URL.createObjectURL(blob);
+          // Ensure correct MIME type for video
+          const videoBlob = new Blob([blob], { type: 'video/mp4' });
+          const url = URL.createObjectURL(videoBlob);
           setVideoBlobUrl(url);
         }
       } catch (err) {
@@ -135,6 +137,28 @@ export function RenderResult({
 
       {/* Metadata */}
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-400">
+        {/* Duration */}
+        <span className="flex items-center gap-1">
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+            />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          {status.duration_seconds != null ? `${status.duration_seconds.toFixed(1)}s` : 'N/A'}
+        </span>
         {status.file_size && (
           <span className="flex items-center gap-1">
             <svg
@@ -254,17 +278,17 @@ export function RenderResult({
 
       {/* Video preview for both preview and final renders */}
       {status.output_url && (
-        <div className="mt-3 rounded-lg overflow-hidden bg-black aspect-video">
+        <div className="mt-3 rounded-lg overflow-hidden bg-black" style={{ minWidth: '300px' }}>
           {videoError ? (
-            <div className="w-full h-full flex items-center justify-center text-red-400 text-sm">
+            <div className="w-full aspect-video flex items-center justify-center text-red-400 text-sm">
               {videoError}
             </div>
           ) : videoBlobUrl ? (
             <video
               src={videoBlobUrl}
               controls
-              className="w-full h-full"
-              preload="metadata"
+              className="w-full"
+              preload="auto"
             >
               Your browser does not support the video tag.
             </video>

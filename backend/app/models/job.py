@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 import uuid
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -96,6 +96,11 @@ class RenderJob(Base):
         BigInteger,
         nullable=True,
         doc="Output file size in bytes"
+    )
+    duration_seconds: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+        doc="Output video duration in seconds"
     )
 
     # Error handling

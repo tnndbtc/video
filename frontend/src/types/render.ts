@@ -28,6 +28,7 @@ export interface RenderJobStatus {
   progress_message?: string;
   output_url?: string;
   file_size?: number;
+  duration_seconds?: number;
   error?: string;
   created_at?: string;
   started_at?: string;

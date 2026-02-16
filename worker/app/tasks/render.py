@@ -208,6 +208,7 @@ class RenderJob(Base):
     progress_message = Column(String(200), nullable=True)
     output_path = Column(String(500), nullable=True)
     file_size = Column(BigInteger, nullable=True)
+    duration_seconds = Column(Float, nullable=True)
     error_message = Column(Text, nullable=True)
     render_settings_json = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False)
@@ -829,6 +830,7 @@ def update_render_job_status(
     progress_message: str = None,
     output_path: str = None,
     file_size: int = None,
+    duration_seconds: float = None,
     error_message: str = None,
     started_at: datetime = None,
     completed_at: datetime = None,
@@ -851,6 +853,8 @@ def update_render_job_status(
             render_job.output_path = output_path
         if file_size is not None:
             render_job.file_size = file_size
+        if duration_seconds is not None:
+            render_job.duration_seconds = duration_seconds
         if error_message is not None:
             render_job.error_message = error_message
         if started_at is not None:
@@ -1224,6 +1228,7 @@ def render_video(project_id: str, job_type: str) -> dict:
             progress_message="Render complete",
             output_path=relative_output_path,
             file_size=file_size,
+            duration_seconds=total_duration_ms / 1000.0,
             completed_at=datetime.utcnow(),
         )
 
