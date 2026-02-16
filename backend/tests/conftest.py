@@ -33,7 +33,11 @@ from sqlalchemy.pool import StaticPool
 # Set test environment variables before importing app modules
 os.environ["SECRET_KEY"] = "test-secret-key-for-testing-purposes-only-32chars"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-os.environ["REDIS_URL"] = "redis://localhost:6379/0"
+# Only set REDIS_URL if not already set (Docker sets it to redis://redis:6379/0)
+if "REDIS_URL" not in os.environ:
+    os.environ["REDIS_URL"] = "redis://localhost:6379/0"
+# Disable rate limiting for tests
+os.environ["DISABLE_RATE_LIMIT"] = "1"
 
 # Create a temporary directory for test storage
 _test_storage_dir = tempfile.mkdtemp(prefix="beatstitch_test_")
@@ -547,25 +551,27 @@ def large_file() -> bytes:
 # Test Storage Fixtures
 # =============================================================================
 
+# Use the module-level storage directory for all tests to avoid path conflicts
+_test_storage_path = Path(_test_storage_dir)
+
 
 @pytest.fixture
 def test_storage_dir() -> Generator[Path, None, None]:
-    """Provide a temporary storage directory for tests."""
-    with tempfile.TemporaryDirectory(prefix="beatstitch_test_") as tmpdir:
-        yield Path(tmpdir)
+    """Provide the test storage directory (shared across tests)."""
+    yield _test_storage_path
 
 
 @pytest.fixture(autouse=True)
-def setup_test_storage(test_storage_dir: Path) -> Generator[None, None, None]:
+def setup_test_storage() -> Generator[None, None, None]:
     """Set up test storage directory for each test."""
-    # Create necessary subdirectories
-    (test_storage_dir / "uploads").mkdir(exist_ok=True)
-    (test_storage_dir / "derived").mkdir(exist_ok=True)
-    (test_storage_dir / "outputs").mkdir(exist_ok=True)
+    # Create necessary subdirectories (using module-level storage dir)
+    (_test_storage_path / "uploads").mkdir(exist_ok=True)
+    (_test_storage_path / "derived").mkdir(exist_ok=True)
+    (_test_storage_path / "outputs").mkdir(exist_ok=True)
 
-    # Patch the storage root
-    with patch("app.core.storage.get_storage_root", return_value=test_storage_dir):
-        with patch("app.core.storage.STORAGE_ROOT", test_storage_dir):
+    # Patch the storage root to use the module-level directory
+    with patch("app.core.storage.get_storage_root", return_value=_test_storage_path):
+        with patch("app.core.storage.STORAGE_ROOT", _test_storage_path):
             yield
 
 

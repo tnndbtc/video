@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from worker.app.tasks.motion_engine.cache import (
+from app.tasks.motion_engine.cache import (
     generate_cache_key,
     MotionClipCache,
 )
@@ -258,7 +258,7 @@ class TestMotionClipCache:
             # Add some clips
             for i in range(3):
                 with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
-                    f.write(b"x" * 1000)  # 1KB each
+                    f.write(b"x" * 1024 * 10)  # 10KB each - survives rounding
                     source_path = f.name
 
                 cache_key = f"{i:02x}" + "d" * 62

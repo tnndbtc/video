@@ -451,6 +451,9 @@ show_menu() {
     echo -e "  ${BOLD}6)${NC} View logs"
     echo -e "     ${YELLOW}(Follow container logs)${NC}"
     echo ""
+    echo -e "  ${BOLD}7)${NC} Run tests"
+    echo -e "     ${GREEN}(Backend + Worker test suites)${NC}"
+    echo ""
     echo -e "  ${BOLD}0)${NC} Exit"
     echo ""
     echo -e "${CYAN}============================================${NC}"
@@ -508,6 +511,105 @@ view_logs() {
 }
 
 # =============================================================================
+# Test Runner
+# =============================================================================
+
+run_tests() {
+    print_header "Run Tests"
+
+    local compose_cmd
+    if docker compose version >/dev/null 2>&1; then
+        compose_cmd="docker compose"
+    else
+        compose_cmd="docker-compose"
+    fi
+
+    # Check if containers are running
+    if ! $compose_cmd ps --format json 2>/dev/null | grep -q "running"; then
+        print_error "Containers are not running. Please start them first (option 1)."
+        return 1
+    fi
+
+    echo "Select tests to run:"
+    echo ""
+    echo "  1) Run all tests (backend + worker)"
+    echo "  2) Backend tests only"
+    echo "  3) Worker tests only"
+    echo "  4) Worker golden tests only"
+    echo "  5) Backend unit tests only"
+    echo "  0) Back to main menu"
+    echo ""
+    read -p "Enter choice [0-5]: " test_choice
+
+    case $test_choice in
+        1)
+            print_header "Running All Tests"
+            echo ""
+
+            # Ensure pytest is available in both containers
+            print_info "Installing pytest in containers..."
+            $compose_cmd exec -T backend pip install pytest pytest-asyncio -q 2>/dev/null || true
+            $compose_cmd exec -T worker pip install pytest -q 2>/dev/null || true
+
+            # Run backend tests
+            print_info "Running backend tests..."
+            echo ""
+            if $compose_cmd exec -T backend python -m pytest tests/ -v --tb=short 2>&1; then
+                print_success "Backend tests passed!"
+            else
+                print_warning "Some backend tests failed"
+            fi
+            echo ""
+
+            # Run worker tests
+            print_info "Running worker tests..."
+            echo ""
+            if $compose_cmd exec -T -e PYTHONPATH=/app worker python -m pytest tests/ -v --tb=short 2>&1; then
+                print_success "Worker tests passed!"
+            else
+                print_warning "Some worker tests failed"
+            fi
+            ;;
+        2)
+            print_header "Running Backend Tests"
+            echo ""
+            # Ensure pytest is available
+            $compose_cmd exec -T backend pip install pytest pytest-asyncio -q 2>/dev/null || true
+            $compose_cmd exec -T backend python -m pytest tests/ -v --tb=short 2>&1
+            ;;
+        3)
+            print_header "Running Worker Tests"
+            echo ""
+            # Ensure pytest is available
+            $compose_cmd exec -T worker pip install pytest -q 2>/dev/null || true
+            $compose_cmd exec -T -e PYTHONPATH=/app worker python -m pytest tests/ -v --tb=short 2>&1
+            ;;
+        4)
+            print_header "Running Worker Golden Tests"
+            echo ""
+            print_info "These tests verify deterministic video rendering..."
+            echo ""
+            # Ensure pytest is available
+            $compose_cmd exec -T worker pip install pytest -q 2>/dev/null || true
+            $compose_cmd exec -T -e PYTHONPATH=/app worker python -m pytest tests/golden/ -v --tb=short 2>&1
+            ;;
+        5)
+            print_header "Running Backend Unit Tests"
+            echo ""
+            # Ensure pytest is available
+            $compose_cmd exec -T backend pip install pytest pytest-asyncio -q 2>/dev/null || true
+            $compose_cmd exec -T backend python -m pytest tests/unit/ -v --tb=short 2>&1
+            ;;
+        0)
+            return 0
+            ;;
+        *)
+            print_warning "Invalid choice"
+            ;;
+    esac
+}
+
+# =============================================================================
 # Main Script
 # =============================================================================
 
@@ -525,7 +627,7 @@ main() {
 
     while true; do
         show_menu
-        read -p "Enter your choice [0-6]: " choice
+        read -p "Enter your choice [0-7]: " choice
 
         case $choice in
             1)
@@ -556,6 +658,9 @@ main() {
             6)
                 view_logs
                 ;;
+            7)
+                run_tests
+                ;;
             0)
                 echo ""
                 print_info "Goodbye!"
@@ -563,7 +668,7 @@ main() {
                 exit 0
                 ;;
             *)
-                print_warning "Invalid option. Please enter 0-6."
+                print_warning "Invalid option. Please enter 0-7."
                 ;;
         esac
 

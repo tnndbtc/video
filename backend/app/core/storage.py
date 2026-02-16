@@ -59,6 +59,15 @@ def _get_storage_root_cached() -> Path:
 STORAGE_ROOT = _get_storage_root_cached()
 
 
+def _mkdir_world_writable(path: Path) -> None:
+    """
+    Create a directory (and all parents) with world-writable permissions (0o777).
+    Required for multi-container setups where backend creates dirs and worker writes to them.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, 0o777)
+
+
 def sanitize_filename(filename: str) -> str:
     """
     Sanitize a filename to prevent path traversal and other security issues.
@@ -280,16 +289,16 @@ def ensure_project_directories(project_id: str) -> dict[str, Path]:
     directories = {}
     for category in VALID_CATEGORIES:
         dir_path = base_path / category
-        dir_path.mkdir(parents=True, exist_ok=True)
+        _mkdir_world_writable(dir_path)
         directories[category] = dir_path
 
     # Also create derived and output directories
     derived_path = storage_root / "derived" / project_id
-    derived_path.mkdir(parents=True, exist_ok=True)
+    _mkdir_world_writable(derived_path)
     directories["derived"] = derived_path
 
     output_path = storage_root / "outputs" / project_id
-    output_path.mkdir(parents=True, exist_ok=True)
+    _mkdir_world_writable(output_path)
     directories["outputs"] = output_path
 
     return directories

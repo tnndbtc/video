@@ -8,7 +8,7 @@ import tempfile
 
 import pytest
 
-from worker.app.tasks.motion_engine.beat_sync import (
+from app.tasks.motion_engine.beat_sync import (
     load_beat_grid,
     get_beat_frames,
     build_beat_pulse_expression,

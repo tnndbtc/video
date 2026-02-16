@@ -4,7 +4,7 @@ Unit tests for motion_engine.presets module.
 
 import pytest
 
-from worker.app.tasks.motion_engine.presets import (
+from app.tasks.motion_engine.presets import (
     MotionPreset,
     PRESET_LIBRARY,
     get_preset,

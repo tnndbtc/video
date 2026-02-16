@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "edl_hash": "test_golden_001",
+  "transition_type": "cut",
+  "transition_duration_ms": 0,
+  "total_duration_ms": 2000,
+  "segment_count": 2,
+  "audio_asset_id": "test_audio",
+  "segments": [
+    {
+      "segment_index": 0,
+      "media_asset_id": "test_image_001",
+      "media_type": "image",
+      "timeline_in_ms": 0,
+      "timeline_out_ms": 1000,
+      "render_duration_ms": 1000,
+      "source_in_ms": 0
+    },
+    {
+      "segment_index": 1,
+      "media_asset_id": "test_image_002",
+      "media_type": "image",
+      "timeline_in_ms": 1000,
+      "timeline_out_ms": 2000,
+      "render_duration_ms": 1000,
+      "source_in_ms": 0
+    }
+  ]
+}

@@ -7,6 +7,7 @@ preventing bypass via parameterized URLs (e.g., /projects/abc/render vs /project
 """
 
 import json
+import os
 from typing import Callable, Optional
 
 from fastapi import HTTPException, Request, Response
@@ -15,6 +16,10 @@ from starlette.responses import JSONResponse
 from starlette.routing import Match
 
 from .redis import get_redis_connection
+
+
+# Check if rate limiting is disabled (for testing)
+RATE_LIMITING_DISABLED = os.environ.get("DISABLE_RATE_LIMIT", "").lower() in ("1", "true", "yes")
 
 
 # Rate limits by category: (requests, window_seconds)
@@ -232,6 +237,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         Returns:
             Response: The response with rate limit headers
         """
+        # Skip rate limiting if disabled (for testing)
+        if RATE_LIMITING_DISABLED:
+            return await call_next(request)
+
         return await rate_limit_middleware(request, call_next)
 
 

@@ -4,7 +4,7 @@ Unit tests for motion_engine.ffmpeg_templates module.
 
 import pytest
 
-from worker.app.tasks.motion_engine.ffmpeg_templates import (
+from app.tasks.motion_engine.ffmpeg_templates import (
     RenderConfig,
     build_zoom_expression,
     build_pan_x_expression,
@@ -13,7 +13,7 @@ from worker.app.tasks.motion_engine.ffmpeg_templates import (
     build_render_command,
     build_simple_scale_command,
 )
-from worker.app.tasks.motion_engine.presets import MotionPreset, PRESET_LIBRARY
+from app.tasks.motion_engine.presets import MotionPreset, PRESET_LIBRARY
 
 
 class TestRenderConfig:

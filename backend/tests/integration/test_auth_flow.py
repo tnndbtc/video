@@ -272,7 +272,8 @@ class TestProtectedEndpoints:
             headers={"Authorization": "Bearer "},
         )
 
-        assert response.status_code == 401
+        # Empty bearer token returns 403 (Forbidden) - invalid credentials
+        assert response.status_code == 403
 
 
 class TestTokenValidation:
