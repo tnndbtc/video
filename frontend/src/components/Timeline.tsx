@@ -7,6 +7,23 @@ import type { Timeline as TimelineType, PreviewSegment } from '../types/timeline
 import { TimelineSegment } from './TimelineSegment';
 import { formatTimelineTime, formatDuration } from '../utils/formatTime';
 
+// @dnd-kit for drag-and-drop reordering
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+
 export interface TimelineProps {
   timeline: TimelineType | null;
   previewSegments?: PreviewSegment[] | null;
@@ -165,34 +182,35 @@ function BeatMarkers({
 
 /**
  * Preview segment renderer for beat-synced timeline preview.
- * Simplified version of TimelineSegment for preview mode.
+ * Uses @dnd-kit for drag-and-drop reordering.
  */
-function PreviewSegmentView({
+function SortablePreviewSegment({
   segment,
   pixelsPerMs,
   index,
   isLast,
   onDelete,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
-  isDragging,
-  isDragOver,
 }: {
   segment: PreviewSegment;
   pixelsPerMs: number;
   index: number;
   isLast: boolean;
   onDelete?: (mediaId: string) => void;
-  onDragStart?: (e: React.DragEvent, index: number) => void;
-  onDragOver?: (e: React.DragEvent, index: number) => void;
-  onDrop?: (e: React.DragEvent, index: number) => void;
-  onDragEnd?: () => void;
-  isDragging?: boolean;
-  isDragOver?: boolean;
 }) {
-  const width = Math.max(segment.duration_ms * pixelsPerMs, 40);
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: segment.media_id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    width: `${Math.max(segment.duration_ms * pixelsPerMs, 40)}px`,
+  };
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -203,28 +221,20 @@ function PreviewSegmentView({
 
   return (
     <div
-      className={`relative flex-shrink-0 h-[80px] cursor-grab active:cursor-grabbing transition-all ${
-        isDragging ? 'opacity-50 scale-95' : ''
-      } ${isDragOver ? 'translate-x-2' : ''}`}
-      style={{ width: `${width}px` }}
-      draggable={true}
-      onDragStart={(e) => onDragStart?.(e, index)}
-      onDragOver={(e) => {
-        e.preventDefault();
-        onDragOver?.(e, index);
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        onDrop?.(e, index);
-      }}
-      onDragEnd={onDragEnd}
+      ref={setNodeRef}
+      style={style}
+      className={`relative flex-shrink-0 h-[80px] cursor-grab active:cursor-grabbing transition-opacity ${
+        isDragging ? 'opacity-50 z-50' : ''
+      }`}
+      {...attributes}
+      {...listeners}
     >
-      {/* Delete button */}
+      {/* Delete button - outside of drag listeners */}
       <button
         onClick={handleDelete}
+        onPointerDown={(e) => e.stopPropagation()}  // Prevent drag when clicking delete
         className="absolute -top-2 -right-2 z-50 p-1 rounded-full bg-red-600 text-white hover:bg-red-700 shadow-lg border-2 border-white"
         title="Remove from timeline"
-        draggable={false}
       >
         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -241,7 +251,7 @@ function PreviewSegmentView({
           <img
             src={segment.thumbnail_url}
             alt={`Preview ${index + 1}`}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover pointer-events-none"
             draggable={false}
           />
         ) : (
@@ -305,36 +315,29 @@ export function Timeline({ timeline, previewSegments, bpm, beatsPerCut: propBeat
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const pixelsPerMs = ZOOM_LEVELS[zoomIndex];
 
-  // Drag state for reordering
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  // @dnd-kit sensors for pointer and keyboard support
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 5, // 5px movement before drag starts
+      },
+    }),
+    useSensor(KeyboardSensor)
+  );
 
-  const handleSegmentDragStart = useCallback((e: React.DragEvent, index: number) => {
-    setDraggedIndex(index);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', String(index));
-  }, []);
+  // Handle drag end for @dnd-kit
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
 
-  const handleSegmentDragOver = useCallback((e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    if (draggedIndex !== null && index !== draggedIndex) {
-      setDragOverIndex(index);
+    if (over && active.id !== over.id && previewSegments && onReorderMedia) {
+      const oldIndex = previewSegments.findIndex(s => s.media_id === active.id);
+      const newIndex = previewSegments.findIndex(s => s.media_id === over.id);
+
+      if (oldIndex !== -1 && newIndex !== -1) {
+        onReorderMedia(oldIndex, newIndex);
+      }
     }
-  }, [draggedIndex]);
-
-  const handleSegmentDrop = useCallback((e: React.DragEvent, toIndex: number) => {
-    e.preventDefault();
-    if (draggedIndex !== null && draggedIndex !== toIndex && onReorderMedia) {
-      onReorderMedia(draggedIndex, toIndex);
-    }
-    setDraggedIndex(null);
-    setDragOverIndex(null);
-  }, [draggedIndex, onReorderMedia]);
-
-  const handleSegmentDragEnd = useCallback(() => {
-    setDraggedIndex(null);
-    setDragOverIndex(null);
-  }, []);
+  }, [previewSegments, onReorderMedia]);
 
   const handleZoomIn = useCallback(() => {
     setZoomIndex((prev) => Math.min(prev + 1, ZOOM_LEVELS.length - 1));
@@ -443,40 +446,50 @@ export function Timeline({ timeline, previewSegments, bpm, beatsPerCut: propBeat
 
           {/* Segments track */}
           <div className="relative bg-gray-800 min-h-[100px] pt-5 pb-2 px-3">
-            <div
-              className="flex items-start gap-3 h-[80px]"
-              style={{ width: `${timelineWidth}px` }}
-            >
-              {isRenderedMode ? (
-                // Render actual timeline segments
-                segments!.map((segment, index) => (
+            {isRenderedMode ? (
+              // Render actual timeline segments (no DnD for rendered timelines)
+              <div
+                className="flex items-start gap-3 h-[80px]"
+                style={{ width: `${timelineWidth}px` }}
+              >
+                {segments!.map((segment, index) => (
                   <TimelineSegment
                     key={`${segment.media_asset_id}-${index}`}
                     segment={segment}
                     pixelsPerMs={pixelsPerMs}
                     showTransition={index > 0}
                   />
-                ))
-              ) : (
-                // Render preview segments
-                previewSegments!.map((segment, index) => (
-                  <PreviewSegmentView
-                    key={`${segment.media_id}-${index}`}
-                    segment={segment}
-                    pixelsPerMs={pixelsPerMs}
-                    index={index}
-                    isLast={index === previewSegments!.length - 1}
-                    onDelete={onDeleteMedia}
-                    onDragStart={handleSegmentDragStart}
-                    onDragOver={handleSegmentDragOver}
-                    onDrop={handleSegmentDrop}
-                    onDragEnd={handleSegmentDragEnd}
-                    isDragging={draggedIndex === index}
-                    isDragOver={dragOverIndex === index}
-                  />
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            ) : (
+              // Render preview segments with @dnd-kit sortable
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={previewSegments!.map(s => s.media_id)}
+                  strategy={horizontalListSortingStrategy}
+                >
+                  <div
+                    className="flex items-start gap-3 h-[80px]"
+                    style={{ width: `${timelineWidth}px` }}
+                  >
+                    {previewSegments!.map((segment, index) => (
+                      <SortablePreviewSegment
+                        key={segment.media_id}
+                        segment={segment}
+                        pixelsPerMs={pixelsPerMs}
+                        index={index}
+                        isLast={index === previewSegments!.length - 1}
+                        onDelete={onDeleteMedia}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            )}
 
             {/* Beat markers */}
             <BeatMarkers

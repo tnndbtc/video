@@ -8,6 +8,7 @@ import { AudioUploader } from '../components/AudioUploader';
 import { Timeline } from '../components/Timeline';
 import { RenderPanel } from '../components/RenderPanel';
 import { parseRuleText } from '../utils/parseRuleText';
+import { DND_MEDIA_ID } from '../utils/dndTypes';
 import type { PreviewSegment } from '../types/timeline';
 
 function ArrowLeftIcon({ className = '' }: { className?: string }) {
@@ -120,7 +121,10 @@ export function Editor() {
     if (project && !initializedRef.current) {
       initializedRef.current = true;
       if (project.timeline_media_ids?.length) {
-        setTimelineMediaIds(project.timeline_media_ids);
+        // Filter out corrupted data (indices like '0', '1' that aren't UUIDs)
+        // Valid UUIDs contain hyphens, indices don't
+        const cleanedIds = project.timeline_media_ids.filter(id => id.includes('-'));
+        setTimelineMediaIds(cleanedIds);
       }
       if (project.video_length_seconds) {
         setVideoLengthInput(String(project.video_length_seconds));
@@ -336,7 +340,7 @@ export function Editor() {
                   </span>
                 )}
               </h2>
-              {/* Drop zone wrapper - always accepts drops */}
+              {/* Drop zone wrapper - accepts external media drops from MediaGrid */}
               <div
                 className="relative border-2 border-dashed border-transparent hover:border-gray-600 transition-colors"
                 onDragEnter={(e) => {
@@ -345,7 +349,7 @@ export function Editor() {
                 }}
                 onDragOver={(e) => {
                   e.preventDefault();
-                  e.dataTransfer.dropEffect = 'move';
+                  e.dataTransfer.dropEffect = 'copy';
                 }}
                 onDragLeave={(e) => {
                   e.currentTarget.classList.remove('border-blue-500', 'bg-blue-900/20');
@@ -353,8 +357,10 @@ export function Editor() {
                 onDrop={(e) => {
                   e.preventDefault();
                   e.currentTarget.classList.remove('border-blue-500', 'bg-blue-900/20');
-                  const mediaId = e.dataTransfer.getData('text/plain');
-                  if (mediaId) {
+
+                  // Accept external media drops (prefer custom type, fallback to text/plain)
+                  const mediaId = e.dataTransfer.getData(DND_MEDIA_ID) || e.dataTransfer.getData('text/plain');
+                  if (mediaId && mediaId.includes('-')) {  // UUID sanity check
                     handleAddToTimeline(mediaId);
                   }
                 }}
