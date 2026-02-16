@@ -594,7 +594,11 @@ class FFmpegCommandBuilder:
 
 def update_job_progress(percent: int, message: str) -> None:
     """
-    Update RQ job progress metadata.
+    Update RQ job progress metadata and Redis progress key.
+
+    Writes to both:
+    - RQ job.meta (backward compatibility)
+    - beatstitch:progress:{job_id} (read by backend's get_progress())
 
     Args:
         percent: Progress percentage (0-100)
@@ -602,9 +606,27 @@ def update_job_progress(percent: int, message: str) -> None:
     """
     job = get_current_job()
     if job:
+        # Update RQ job meta (existing behavior)
         job.meta["progress_percent"] = percent
         job.meta["progress_message"] = message
         job.save_meta()
+
+        # Also write to the Redis key that backend reads
+        # Key format: beatstitch:progress:{job_id}
+        # Must use Redis hash format to match backend's hgetall() expectations
+        redis_conn = job.connection
+        if redis_conn:
+            progress_key = f"beatstitch:progress:{job.id}"
+            progress_data = {
+                "percent": str(percent),
+                "message": message,
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+            # Use pipeline for atomic hash set + expire
+            pipe = redis_conn.pipeline()
+            pipe.hset(progress_key, mapping=progress_data)
+            pipe.expire(progress_key, 3600)  # 1-hour expiry
+            pipe.execute()
 
 
 def create_asset_path_resolver(db, project_id: str) -> Callable[[str], str]:
