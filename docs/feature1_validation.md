@@ -247,6 +247,12 @@ Expected Results:
 - Test G: SKIPPED ⏭️ (hangs on corrupted data - known issue)
 - Test H: SKIPPED ⏭️ (marked as slow test)
 
+Note: Corrupted media handling test is marked as slow and skipped in normal runs
+because ffmpeg can hang on malformed inputs. Run manually with:
+```bash
+pytest tests/integration/test_render_real.py::TestRenderEdgeCases::test_render_handles_corrupted_media -m slow
+```
+
 PHASE 4: Run All Tests Together
 --------------------------------
 

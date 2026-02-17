@@ -608,7 +608,8 @@ class TestRenderEdgeCases:
             error_msg = str(exc_info.value).lower()
             assert "not found" in error_msg or "no such file" in error_msg
 
-    @pytest.mark.skip(reason="Test hangs - ffmpeg may not have timeout on corrupted files")
+    @pytest.mark.slow
+    @pytest.mark.skip(reason="Skipped by default: corrupted media may cause ffmpeg to hang. Run manually with -m slow in controlled environment.")
     def test_render_handles_corrupted_media(
         self,
         test_db_session,

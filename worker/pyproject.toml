@@ -63,6 +63,6 @@ disallow_untyped_defs = true
 [tool.pytest.ini_options]
 pythonpath = ["."]
 markers = [
-    "slow: marks tests as slow (requires FFmpeg, run with -m slow)",
+    "slow: tests that may hang or take very long (manual run recommended)",
     "integration: marks tests as integration tests (requires real media assets)",
 ]
