@@ -24,7 +24,7 @@ This guide covers common issues and their solutions.
 
 ```bash
 # Check health endpoint
-curl http://localhost:8000/health
+curl http://localhost:8080/health
 
 # Expected response:
 # {"status": "healthy", "checks": {...}}
@@ -85,8 +85,8 @@ docker-compose logs --tail=100 backend
 docker-compose logs
 
 # Check for port conflicts
-sudo lsof -i :3000
-sudo lsof -i :8000
+sudo lsof -i :3001
+sudo lsof -i :8080
 sudo lsof -i :6379
 ```
 
@@ -95,7 +95,7 @@ sudo lsof -i :6379
 1. **Port in use:**
    ```bash
    # Find and kill process using the port
-   sudo lsof -i :8000
+   sudo lsof -i :8080
    kill -9 <PID>
    ```
 
@@ -268,7 +268,7 @@ ffmpeg -i input.wma -c:a libmp3lame output.mp3
 
 2. **Try re-analyzing:**
    ```bash
-   curl -X POST http://localhost:8000/api/projects/{id}/audio/analyze \
+   curl -X POST http://localhost:8080/api/projects/{id}/audio/analyze \
      -H "Authorization: Bearer $TOKEN"
    ```
 
@@ -328,7 +328,7 @@ RUN pip install madmom
 **Check prerequisites:**
 
 ```bash
-curl http://localhost:8000/api/projects/{id}/status \
+curl http://localhost:8080/api/projects/{id}/status \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -358,7 +358,7 @@ curl http://localhost:8000/api/projects/{id}/status \
 Regenerate timeline:
 
 ```bash
-curl -X POST http://localhost:8000/api/projects/{id}/timeline/generate \
+curl -X POST http://localhost:8080/api/projects/{id}/timeline/generate \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -450,11 +450,11 @@ curl -X POST http://localhost:8000/api/projects/{id}/timeline/generate \
 
 ```bash
 # Get current hash
-HASH=$(curl -s http://localhost:8000/api/projects/{id}/timeline \
+HASH=$(curl -s http://localhost:8080/api/projects/{id}/timeline \
   -H "Authorization: Bearer $TOKEN" | jq -r '.edl_hash')
 
 # Retry render
-curl -X POST http://localhost:8000/api/projects/{id}/render \
+curl -X POST http://localhost:8080/api/projects/{id}/render \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"type\": \"preview\", \"edl_hash\": \"$HASH\"}"
@@ -705,7 +705,7 @@ curl -X POST http://localhost:8000/api/projects/{id}/render \
 
 1. **Get new token:**
    ```bash
-   curl -X POST http://localhost:8000/api/auth/login \
+   curl -X POST http://localhost:8080/api/auth/login \
      -H "Content-Type: application/json" \
      -d '{"username":"user","password":"pass"}'
    ```
@@ -730,7 +730,7 @@ curl -X POST http://localhost:8000/api/projects/{id}/render \
 
 3. **Create new account:**
    ```bash
-   curl -X POST http://localhost:8000/api/auth/register \
+   curl -X POST http://localhost:8080/api/auth/register \
      -H "Content-Type: application/json" \
      -d '{"username":"newuser","password":"newpass123"}'
    ```
@@ -747,7 +747,7 @@ curl -X POST http://localhost:8000/api/projects/{id}/render \
    ```bash
    # Test upload speed
    curl -o /dev/null -w "Speed: %{speed_upload}\n" \
-     -X POST -F "file=@test.mp4" http://localhost:8000/api/upload
+     -X POST -F "file=@test.mp4" http://localhost:8080/api/upload
    ```
 
 2. **Disable proxy buffering:**
@@ -818,7 +818,7 @@ If you can't resolve an issue:
    docker-compose logs > logs.txt
 
    # Health check
-   curl http://localhost:8000/health > health.json
+   curl http://localhost:8080/health > health.json
    ```
 
 2. **Check GitHub Issues** for similar problems

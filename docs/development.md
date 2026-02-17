@@ -42,9 +42,9 @@ make init-env
 make dev
 
 # Access services:
-# Frontend: http://localhost:3000
-# Backend API: http://localhost:8000
-# API Docs: http://localhost:8000/docs
+# Frontend: http://localhost:3001
+# Backend API: http://localhost:8080
+# API Docs: http://localhost:8080/docs
 ```
 
 ### Local Development Without Docker
@@ -88,7 +88,7 @@ cd frontend
 npm install
 
 # Set environment variables
-export VITE_API_URL=http://localhost:8000
+export VITE_API_URL=http://localhost:8080
 
 # Start development server
 npm run dev
@@ -315,6 +315,46 @@ npm test -- --watch
 cd frontend
 npm run test:e2e
 ```
+
+## Manual UI Validation
+
+The quickest way to confirm the full stack is working is to walk through the
+core workflow in a browser.
+
+### Find your HOST_IP
+
+Run `setup.sh` → option 3, or:
+
+```bash
+hostname -I | awk '{print $1}'
+```
+
+Two common cases:
+- **Same machine as server:** use `localhost` — `http://localhost:3001`
+- **Different machine on LAN (most common):** use the server's LAN IP —
+  `http://<HOST_IP>:3001` (find it via `setup.sh` → option 3, or `hostname -I`)
+
+### Health check (before opening browser)
+
+```bash
+curl http://<HOST_IP>:8080/health
+# {"status": "healthy", ...}
+```
+
+### Steps
+
+| Step | Action | Expected result |
+|------|--------|-----------------|
+| 1 | Open `http://<HOST_IP>:3001` | Login page loads |
+| 2 | Click Register, create account | Redirected to Dashboard |
+| 3 | Click "New Project", give it a name | Project card appears |
+| 4 | Open project, upload 2–3 images/videos | Assets show status "ready" |
+| 5 | (Optional) Upload an audio track | Beat analysis completes |
+| 6 | Click "Render" (Preview or Final) | Render job queued → running → complete |
+| 7 | Download / play the rendered video | Video plays correctly |
+
+If all steps pass, the frontend (`:3001`), backend (`:8080`), worker, Redis, and
+Postgres are all functioning end-to-end.
 
 ### Test Fixtures
 
@@ -743,13 +783,13 @@ docker-compose build backend
 
 ```bash
 # Login
-TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login \
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"test","password":"test123"}' | jq -r '.access_token')
 
 # Make authenticated request
 curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8000/api/projects
+  http://localhost:8080/api/projects
 ```
 
 ### Testing API with httpie
@@ -759,10 +799,10 @@ curl -H "Authorization: Bearer $TOKEN" \
 pip install httpie
 
 # Login
-http POST localhost:8000/api/auth/login username=test password=test123
+http POST localhost:8080/api/auth/login username=test password=test123
 
 # Make authenticated request
-http GET localhost:8000/api/projects "Authorization: Bearer $TOKEN"
+http GET localhost:8080/api/projects "Authorization: Bearer $TOKEN"
 ```
 
 ## Contributing

@@ -2,6 +2,45 @@
 
 A web-based video editor that automatically syncs media cuts to music beats. Upload your images, videos, and an audio track, and BeatStitch will create a perfectly beat-synced video montage.
 
+## Final Goal: Prompt-to-Video API
+
+BeatStitch's north-star capability is a fully automated **prompt-to-video** pipeline:
+given a list of media assets and a natural-language description, the system produces a
+rendered, edit-ready video with zero manual timeline work.
+
+### Inputs
+
+| Input | Description |
+|-------|-------------|
+| **Assets** | One or more images, video clips, and/or an audio track (already uploaded to a project) |
+| **Prompt** | Natural-language description of the desired video (e.g. "energetic montage, cut every beat") |
+| **Constraints** *(optional)* | Target duration, transition style, audio mode, max clips |
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| **EditPlan JSON** | Machine-validated timeline (EDL v1) describing every clip, duration, and transition |
+| **Rendered video** | Final MP4 produced by the FFmpeg worker, accessible via a download URL |
+
+### Pipeline
+
+```
+Ingest assets → AI Planner (OpenAI) → Validate EditPlan → Apply timeline → Render worker (FFmpeg) → Result
+```
+
+**Key design principle:** _The LLM decides the edit plan; the backend enforces correctness; the worker renders._
+
+- The AI Planner calls OpenAI to produce an `EditPlan` JSON (EDL v1 format).
+- The backend validator rejects any plan that references unknown media IDs, impossible durations, or invalid transitions.
+- Only a valid plan is passed to the FFmpeg worker for rendering.
+- The frontend `/ai-stitch` page exposes this full pipeline for manual testing.
+
+### Try It
+
+Visit **http://localhost:3001/ai-stitch** after starting the stack to use the interactive testing UI.
+See [docs/manual_test_ai_stitch.md](docs/manual_test_ai_stitch.md) for a step-by-step guide.
+
 ## Features
 
 - **Automatic Beat Detection** - Analyzes audio to detect beats using madmom/librosa
@@ -37,10 +76,10 @@ make init-env
 make dev
 
 # Access the app
-open http://localhost:3000
+open http://localhost:3001
 
 # API documentation
-open http://localhost:8000/docs
+open http://localhost:8080/docs
 ```
 
 ### Production Deployment
@@ -85,6 +124,8 @@ make logs
 ## Documentation
 
 - [API Documentation](docs/api.md) - REST API reference with examples
+- [AI Prompt-to-Video](docs/ai_prompt_to_video.md) - Endpoint contract, EditPlan schema, pipeline design
+- [Manual Testing: AI Stitch](docs/manual_test_ai_stitch.md) - Step-by-step testing guide
 - [Deployment Guide](docs/deployment.md) - Production deployment and configuration
 - [Development Guide](docs/development.md) - Local setup, testing, and contributing
 - [Troubleshooting](docs/troubleshooting.md) - Common issues and solutions

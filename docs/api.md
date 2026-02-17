@@ -12,6 +12,7 @@ This document describes the REST API endpoints for BeatStitch.
 - [Timeline](#timeline)
 - [Rendering](#rendering)
 - [Jobs](#jobs)
+- [AI Planner](#ai-planner)
 - [Error Responses](#error-responses)
 
 ## Overview
@@ -19,7 +20,7 @@ This document describes the REST API endpoints for BeatStitch.
 ### Base URL
 
 ```
-http://localhost:8000/api
+http://localhost:8080/api
 ```
 
 ### Authentication
@@ -39,8 +40,8 @@ Authorization: Bearer <access_token>
 ### Interactive Documentation
 
 FastAPI provides interactive documentation:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+- Swagger UI: `http://localhost:8080/docs`
+- ReDoc: `http://localhost:8080/redoc`
 
 ---
 
@@ -1103,3 +1104,89 @@ Unexpected server error.
 | `output_width` | int | 320-3840 | 1920 |
 | `output_height` | int | 240-2160 | 1080 |
 | `output_fps` | int | 15-60 | 30 |
+
+---
+
+## AI Planner
+
+The AI Planner endpoints power the prompt-to-video pipeline. See
+[docs/ai_prompt_to_video.md](ai_prompt_to_video.md) for the full endpoint contract,
+EditPlan v1 schema, and design rationale.
+
+### Generate EditPlan from Prompt
+
+```http
+POST /api/ai/plan
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "project_id": "550e8400-e29b-41d4-a716-446655440000",
+  "prompt": "Energetic montage, cut on every beat, crossfade transitions",
+  "constraints": {
+    "mode": "no_audio",
+    "target_duration_seconds": 60,
+    "transition_type": "crossfade",
+    "max_clips": 20
+  }
+}
+```
+
+**Response `200 OK`:**
+
+```json
+{
+  "edit_plan": {
+    "version": "1.0",
+    "output": { "width": 1920, "height": 1080, "fps": 30, "format": "mp4" },
+    "timeline": [
+      { "media_id": "uuid-1", "duration": { "seconds": 3.0 } },
+      { "media_id": "uuid-2", "duration": { "seconds": 2.5 }, "transition": { "type": "crossfade", "duration_ms": 500 } }
+    ]
+  },
+  "warnings": [],
+  "model": "gpt-4o"
+}
+```
+
+**Response `503`** (OpenAI key not set -- stub plan returned for testing):
+
+```json
+{
+  "error": "openai_not_configured",
+  "message": "OPENAI_API_KEY is not set. Set it in .env to enable AI planning.",
+  "stub_plan": { "version": "1.0", "timeline": [ /* ... */ ] }
+}
+```
+
+### Apply EditPlan to Project
+
+```http
+POST /api/ai/apply
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "project_id": "550e8400-e29b-41d4-a716-446655440000",
+  "edit_plan": { /* EditPlan v1 JSON */ }
+}
+```
+
+**Response `200 OK`:**
+
+```json
+{
+  "saved": true,
+  "edl_path": "derived/550e8400/edit_request.json",
+  "segment_count": 12,
+  "total_duration_ms": 58400
+}
+```
+
+After applying, use the standard render endpoints:
+
+```
+POST /api/projects/{id}/render          → { "type": "final" }
+GET  /api/projects/{id}/render/final/status
+GET  /api/projects/{id}/render/final/download
+```
