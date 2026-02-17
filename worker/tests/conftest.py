@@ -134,7 +134,7 @@ os.environ['STORAGE_PATH'] = str(_default_storage)
 # STEP 5: Now import worker modules normally (worker's app is in sys.path)
 # ============================================================================
 
-from app.tasks.render import render_video
+from app.tasks.render import render_video, Base as WorkerBase, RenderJob as WorkerRenderJob
 from app.tasks.ffmpeg_runner import FFmpegError
 
 # ============================================================================
@@ -190,8 +190,9 @@ def test_db_engine():
         echo=False,  # Set to True for SQL debugging
     )
 
-    # Create all tables
+    # Create all tables from both backend and worker models
     BackendBase.metadata.create_all(engine)
+    WorkerBase.metadata.create_all(engine)
 
     yield engine
 
@@ -208,6 +209,12 @@ def test_db_session(test_db_engine, monkeypatch):
 
     Also patches app.db.get_db_session to use this test session.
     """
+    # CRITICAL: Reset cached global engine and session factory
+    # These are cached in app.db module and must be cleared for each test
+    import app.db
+    app.db._engine = None
+    app.db._SessionLocal = None
+
     SessionLocal = sessionmaker(bind=test_db_engine)
     session = SessionLocal()
 
@@ -227,6 +234,9 @@ def test_db_session(test_db_engine, monkeypatch):
     finally:
         session.rollback()
         session.close()
+        # Reset again after test to avoid pollution
+        app.db._engine = None
+        app.db._SessionLocal = None
 
 
 @pytest.fixture(scope="session")

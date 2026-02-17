@@ -255,7 +255,6 @@ class TestRenderRealPipeline:
             assert video_info.has_video
             assert video_info.has_audio
 
-    @pytest.mark.xfail(reason="Repeat mode not fully implemented in render pipeline yet")
     def test_render_repeat_timeline_until_audio_end(
         self,
         test_db_session,
@@ -310,10 +309,20 @@ class TestRenderRealPipeline:
             # Save EDL and Timeline
             derived_dir = isolated_storage / "derived" / project["id"]
             derived_dir.mkdir(parents=True, exist_ok=True)
-            edl_path = derived_dir / "edl.json"
+
+            # Save as edit_request.json to activate EditRequest pipeline
+            edl_path = derived_dir / "edit_request.json"
             with open(edl_path, "w") as f:
                 json.dump(edl, f, indent=2)
 
+            # Create render_plan.json to activate EditRequest pipeline
+            render_plan = {
+                "use_edit_request": True,
+                "version": "v1"
+            }
+            render_plan_path = derived_dir / "render_plan.json"
+            with open(render_plan_path, "w") as f:
+                json.dump(render_plan, f, indent=2)
 
             # Expected duration = audio duration (from fixture: 60000ms)
             expected_duration = project["audio_track"].duration_ms

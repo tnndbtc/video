@@ -64,4 +64,5 @@ disallow_untyped_defs = true
 pythonpath = ["."]
 markers = [
     "slow: marks tests as slow (requires FFmpeg, run with -m slow)",
+    "integration: marks tests as integration tests (requires real media assets)",
 ]
