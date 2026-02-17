@@ -54,9 +54,31 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Check if docker is running
+# Check if docker daemon is running (tries without sudo first, falls back to sudo)
 docker_is_running() {
+    docker info >/dev/null 2>&1 || sudo docker info >/dev/null 2>&1
+}
+
+# Check if docker is accessible WITHOUT sudo (i.e. user is in docker group)
+docker_accessible_without_sudo() {
     docker info >/dev/null 2>&1
+}
+
+# Re-exec this script with docker group active so the user never has to
+# manually run "newgrp docker". Uses 'sg' (part of shadow-utils / login).
+reexec_with_docker_group() {
+    if command_exists sg; then
+        print_info "Applying docker group to this session automatically..."
+        sleep 1
+        exec sg docker "$0"
+    else
+        # sg not available (some minimal distros); give clear manual instruction
+        echo ""
+        echo -e "${YELLOW}Run the following command to apply the group, then re-run setup:${NC}"
+        echo -e "         ${CYAN}newgrp docker${NC}"
+        echo ""
+        exit 0
+    fi
 }
 
 # Get local IP address (not localhost)
@@ -88,21 +110,150 @@ get_local_ip() {
 }
 
 # =============================================================================
+# Requirements Installation
+# =============================================================================
+
+install_requirements() {
+    print_header "Installing Requirements"
+
+    local os_type=""
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        os_type="macos"
+    elif [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        os_type="$ID"   # e.g. ubuntu, debian, fedora, centos, rhel
+    else
+        print_error "Unsupported OS. Please install Docker manually: https://docs.docker.com/get-docker/"
+        return 1
+    fi
+
+    # ── Docker ────────────────────────────────────────────────────────────────
+    if command_exists docker; then
+        print_success "Docker already installed – skipping"
+    else
+        print_info "Installing Docker..."
+        case "$os_type" in
+            macos)
+                if command_exists brew; then
+                    brew install --cask docker
+                    print_success "Docker Desktop installed via Homebrew"
+                    print_warning "Open Docker Desktop once to finish setup, then re-run this script"
+                    return 0
+                else
+                    print_error "Homebrew not found. Install it first: https://brew.sh"
+                    print_info "Or install Docker Desktop manually: https://docs.docker.com/desktop/mac/"
+                    return 1
+                fi
+                ;;
+            ubuntu|debian|raspbian|linuxmint|pop)
+                print_info "Using official Docker install script (requires sudo)..."
+                curl -fsSL https://get.docker.com | sudo sh
+                sudo usermod -aG docker "$USER"
+                print_success "Docker installed"
+                print_warning "Log out and back in (or run: newgrp docker) for group changes to take effect"
+                ;;
+            fedora)
+                sudo dnf -y install dnf-plugins-core
+                sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+                sudo dnf -y install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+                sudo usermod -aG docker "$USER"
+                print_success "Docker installed"
+                ;;
+            centos|rhel|rocky|almalinux)
+                sudo yum install -y yum-utils
+                sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+                sudo yum -y install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+                sudo usermod -aG docker "$USER"
+                print_success "Docker installed"
+                ;;
+            arch|manjaro)
+                sudo pacman -Sy --noconfirm docker docker-compose
+                sudo usermod -aG docker "$USER"
+                print_success "Docker installed"
+                ;;
+            *)
+                print_error "Auto-install not supported for OS: $os_type"
+                print_info "Please install Docker manually: https://docs.docker.com/get-docker/"
+                return 1
+                ;;
+        esac
+    fi
+
+    # ── Docker Compose ────────────────────────────────────────────────────────
+    if command_exists docker-compose || docker compose version >/dev/null 2>&1; then
+        print_success "Docker Compose already available – skipping"
+    else
+        print_info "Installing Docker Compose plugin..."
+        case "$os_type" in
+            macos)
+                # Already handled with Docker Desktop above
+                ;;
+            ubuntu|debian|raspbian|linuxmint|pop)
+                sudo apt-get update -qq
+                sudo apt-get install -y docker-compose-plugin
+                print_success "Docker Compose plugin installed"
+                ;;
+            fedora|centos|rhel|rocky|almalinux)
+                # Already installed with Docker above; fall back to standalone
+                sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
+                    -o /usr/local/bin/docker-compose
+                sudo chmod +x /usr/local/bin/docker-compose
+                print_success "Docker Compose standalone installed"
+                ;;
+            arch|manjaro)
+                # Already installed with Docker above
+                ;;
+        esac
+    fi
+
+    # ── Start Docker daemon ───────────────────────────────────────────────────
+    if [[ "$os_type" != "macos" ]]; then
+        if ! docker_is_running 2>/dev/null; then
+            print_info "Starting Docker daemon (requires sudo)..."
+            sudo systemctl enable docker 2>/dev/null || true
+            sudo systemctl start docker  2>/dev/null || true
+            sleep 3
+            if docker_is_running; then
+                print_success "Docker daemon started"
+            else
+                print_warning "Could not start Docker daemon automatically"
+                print_info "Try manually: sudo systemctl start docker"
+            fi
+        else
+            print_success "Docker daemon is already running"
+        fi
+    fi
+
+    echo ""
+    print_success "All requirements installed!"
+    echo ""
+
+    # If docker is now running but not yet accessible without sudo,
+    # re-exec automatically with the docker group applied.
+    if docker_is_running && ! docker_accessible_without_sudo; then
+        print_info "Applying docker group to this session..."
+        sudo usermod -aG docker "$USER" 2>/dev/null || true
+        reexec_with_docker_group
+    fi
+}
+
+# =============================================================================
 # Prerequisites Check
 # =============================================================================
 
 check_prerequisites() {
     print_header "Checking Prerequisites"
 
-    local missing_deps=0
+    local missing_installs=0   # Docker / Compose binary missing
+    local daemon_down=0        # Binaries OK but daemon not running
 
-    # Check Docker
+    # Check Docker binary
     if command_exists docker; then
         print_success "Docker is installed"
     else
         print_error "Docker is not installed"
         echo "        Please install Docker: https://docs.docker.com/get-docker/"
-        missing_deps=1
+        missing_installs=1
     fi
 
     # Check Docker Compose
@@ -111,25 +262,106 @@ check_prerequisites() {
     else
         print_error "Docker Compose is not installed"
         echo "        Please install Docker Compose: https://docs.docker.com/compose/install/"
-        missing_deps=1
+        missing_installs=1
     fi
 
-    # Check if Docker daemon is running
-    if docker_is_running; then
-        print_success "Docker daemon is running"
-    else
-        print_error "Docker daemon is not running"
-        echo "        Please start the Docker daemon"
-        missing_deps=1
+    # Check Docker daemon (only meaningful if Docker binary is present)
+    if [ $missing_installs -eq 0 ]; then
+        if docker_is_running; then
+            print_success "Docker daemon is running"
+        else
+            print_error "Docker daemon is not running"
+            daemon_down=1
+        fi
     fi
 
-    if [ $missing_deps -eq 1 ]; then
+    # ── Nothing wrong ─────────────────────────────────────────────────────────
+    if [ $missing_installs -eq 0 ] && [ $daemon_down -eq 0 ]; then
+        return 0
+    fi
+
+    echo ""
+
+    # ── Only the daemon is down (binaries are fine) ───────────────────────────
+    if [ $missing_installs -eq 0 ] && [ $daemon_down -eq 1 ]; then
+        # First check: maybe the daemon IS running but this user lacks socket access
+        if sudo docker info >/dev/null 2>&1; then
+            print_warning "Docker daemon is running but your user cannot reach it"
+            print_info "Your user is not yet in the 'docker' group (or the group change"
+            print_info "hasn't been applied to this shell session)."
+            echo ""
+            print_info "Fixing group membership now (requires sudo)..."
+            sudo usermod -aG docker "$USER" 2>/dev/null || true
+            reexec_with_docker_group
+        fi
+
+        print_warning "Docker is installed but the daemon is not running"
         echo ""
+        read -p "$(echo -e "${YELLOW}Would you like to start the Docker daemon now? (y/N): ${NC}")" start_daemon
+        if [[ "$start_daemon" =~ ^[Yy]$ ]]; then
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                print_info "Opening Docker Desktop..."
+                open -a Docker 2>/dev/null || print_warning "Could not open Docker Desktop automatically"
+                print_info "Waiting 15 seconds for Docker Desktop to start..."
+                sleep 15
+            else
+                print_info "Starting Docker daemon (requires sudo)..."
+                sudo systemctl enable docker 2>/dev/null || true
+                sudo systemctl start docker  2>/dev/null || true
+                sleep 3
+            fi
+
+            if sudo docker info >/dev/null 2>&1; then
+                print_success "Docker daemon is running"
+                # Check if user can reach it without sudo
+                if ! docker_accessible_without_sudo; then
+                    echo ""
+                    print_warning "Docker requires sudo in this shell (group change not yet active)"
+                    sudo usermod -aG docker "$USER" 2>/dev/null || true
+                    reexec_with_docker_group
+                fi
+                return 0
+            else
+                print_warning "Docker daemon still not responding"
+                if [[ "$OSTYPE" == "darwin"* ]]; then
+                    print_info "Please open Docker Desktop manually and wait for it to finish starting"
+                else
+                    print_info "Check daemon status: sudo systemctl status docker"
+                    print_info "View logs:           sudo journalctl -u docker --no-pager -n 20"
+                fi
+                return 1
+            fi
+        else
+            print_error "Docker daemon must be running to continue"
+            return 1
+        fi
+    fi
+
+    # ── One or more binaries are missing ─────────────────────────────────────
+    print_error "Missing software detected"
+    echo ""
+    read -p "$(echo -e "${YELLOW}Would you like to install missing requirements automatically? (y/N): ${NC}")" auto_install
+    if [[ "$auto_install" =~ ^[Yy]$ ]]; then
+        install_requirements
+        echo ""
+        print_info "Re-checking prerequisites..."
+        echo ""
+        local recheck_missing=0
+        command_exists docker          || recheck_missing=1
+        { command_exists docker-compose || docker compose version >/dev/null 2>&1; } || recheck_missing=1
+        docker_is_running              || recheck_missing=1
+        if [ $recheck_missing -eq 0 ]; then
+            print_success "All prerequisites satisfied!"
+            return 0
+        else
+            print_warning "Some prerequisites are still missing (a re-login may be required)"
+            print_info "Try: newgrp docker   (or open a new terminal and re-run this script)"
+            return 1
+        fi
+    else
         print_error "Please install missing dependencies and try again"
         return 1
     fi
-
-    return 0
 }
 
 # =============================================================================
@@ -454,6 +686,9 @@ show_menu() {
     echo -e "  ${BOLD}7)${NC} Run tests"
     echo -e "     ${GREEN}(Backend + Worker test suites)${NC}"
     echo ""
+    echo -e "  ${BOLD}8)${NC} Install requirements"
+    echo -e "     ${CYAN}(Auto-install Docker & Docker Compose on a new machine)${NC}"
+    echo ""
     echo -e "  ${BOLD}0)${NC} Exit"
     echo ""
     echo -e "${CYAN}============================================${NC}"
@@ -627,7 +862,7 @@ main() {
 
     while true; do
         show_menu
-        read -p "Enter your choice [0-7]: " choice
+        read -p "Enter your choice [0-8]: " choice
 
         case $choice in
             1)
@@ -661,6 +896,9 @@ main() {
             7)
                 run_tests
                 ;;
+            8)
+                install_requirements
+                ;;
             0)
                 echo ""
                 print_info "Goodbye!"
@@ -668,7 +906,7 @@ main() {
                 exit 0
                 ;;
             *)
-                print_warning "Invalid option. Please enter 0-7."
+                print_warning "Invalid option. Please enter 0-8."
                 ;;
         esac
 
