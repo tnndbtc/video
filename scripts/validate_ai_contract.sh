@@ -19,6 +19,78 @@ _pass() { echo "  ✅ $1"; PASS_COUNT=$((PASS_COUNT+1)); }
 _fail() { echo "  ❌ $1"; FAIL_COUNT=$((FAIL_COUNT+1)); }
 _info() { echo "  ℹ  $1"; }
 
+# ── helper: curl with HTTP status code captured separately ────────────────────
+# Usage: _curl_json STATUS_VAR BODY_VAR [curl args...]
+# Sets STATUS_VAR to the HTTP status code (e.g. "200") and BODY_VAR to the body.
+# Uses a temp file so the status code is never mixed into the body.
+_curl_json() {
+  local _status_var="$1" _body_var="$2"
+  shift 2
+  local _tmpfile
+  _tmpfile=$(mktemp)
+  local _code
+  _code=$(curl -s --max-time 30 -o "$_tmpfile" -w '%{http_code}' "$@")
+  printf -v "$_status_var" '%s' "$_code"
+  printf -v "$_body_var" '%s' "$(cat "$_tmpfile")"
+  rm -f "$_tmpfile"
+}
+
+# ── helper: generate a single test JPEG without assuming ffmpeg ───────────────
+# Fallback chain:
+#   1. ffmpeg (preferred when available)
+#   2. scripts/generate_test_media.py with correct positional-dir interface
+#   3. Pillow inline (works without ffmpeg; pip install Pillow)
+# Exits 1 with a clear message if all three options fail.
+_generate_test_jpeg() {
+  local out="$1"
+
+  # Option 1: ffmpeg
+  if command -v ffmpeg &>/dev/null; then
+    if ffmpeg -y -f lavfi -i "color=c=blue:size=64x64:d=1" \
+         -frames:v 1 "$out" -loglevel quiet 2>/dev/null; then
+      return 0
+    fi
+    _info "ffmpeg present but failed generating test JPEG"
+  else
+    _info "ffmpeg not installed; trying python fallback"
+  fi
+
+  # Option 2: generate_test_media.py (correct interface: positional output_dir)
+  if [[ ! -f "scripts/generate_test_media.py" ]]; then
+    echo "  ❌ Missing scripts/generate_test_media.py" >&2
+    exit 1
+  fi
+  local _tmpdir
+  _tmpdir=$(mktemp -d)
+  if python3 scripts/generate_test_media.py "$_tmpdir" >/dev/null 2>&1; then
+    local _img
+    _img=$(find "$_tmpdir/images" -name "*.jpg" 2>/dev/null | head -1)
+    if [[ -n "$_img" && -f "$_img" ]]; then
+      cp "$_img" "$out"
+      rm -rf "$_tmpdir"
+      return 0
+    fi
+  fi
+  rm -rf "$_tmpdir" 2>/dev/null || true
+  _info "generate_test_media.py did not produce images (it also requires ffmpeg)"
+
+  # Option 3: Pillow inline — no ffmpeg needed
+  if python3 - "$out" <<'PYEOF' 2>/dev/null
+import sys
+from PIL import Image
+out = sys.argv[1]
+img = Image.new("RGB", (64, 64), (0, 0, 255))
+img.save(out, "JPEG")
+PYEOF
+  then
+    _info "test JPEG generated via Pillow"
+    return 0
+  fi
+
+  echo "  ❌ Cannot generate test JPEG: install ffmpeg or Pillow (pip install Pillow)" >&2
+  return 1
+}
+
 # ─────────────────────────────────────────────────────────
 # Section 0: Preconditions
 # ─────────────────────────────────────────────────────────
@@ -69,7 +141,6 @@ else
     _pass "Backend reachable at $API_BASE_URL"
   else
     _fail "Backend not reachable at $API_BASE_URL (is the server running?)"
-    # Hard stop — rest of section is meaningless
     echo ""
     echo "=== SUMMARY ==="
     echo "PASS: $PASS_COUNT  FAIL: $FAIL_COUNT"
@@ -102,62 +173,132 @@ else
   [[ -n "$PROJECT_ID" ]] && _pass "Project created: $PROJECT_ID" || { _fail "Project creation failed"; exit 1; }
 
   # ── 2.3 Generate + upload test media ─────────────────────
-  # Generate 2 small test JPEG images via ffmpeg (fast, no dependencies)
-  # Endpoint: POST /api/projects/{id}/media (multipart, field name "files")
+  # Endpoint: POST /api/projects/{id}/media (multipart, field "files")
   # Response: {"total_uploaded": N, "uploaded": [...], "failed": [...]}
+  UPLOADED_MEDIA_IDS=()
   for i in 1 2; do
     IMG="$ARTIFACTS/test_img_${i}.jpg"
-    ffmpeg -y -f lavfi -i "color=c=blue:size=640x480:d=1" \
-      -frames:v 1 "$IMG" -loglevel quiet 2>/dev/null \
-      || python3 scripts/generate_test_media.py --type image --out "$IMG" 2>/dev/null
-    UPLOAD_RESP=$(curl -sf --max-time 30 -X POST "$API_BASE_URL/api/projects/$PROJECT_ID/media" \
+
+    if ! _generate_test_jpeg "$IMG"; then
+      _fail "Test image $i generation failed — cannot continue E2E"
+      break
+    fi
+
+    # Capture HTTP status and body in separate variables (no string-parsing of -w output)
+    _curl_json UPLOAD_HTTP UPLOAD_BODY \
+      --max-time 30 \
+      -X POST "$API_BASE_URL/api/projects/$PROJECT_ID/media" \
       -H "Authorization: Bearer $TOKEN" \
-      -F "files=@$IMG;type=image/jpeg")
-    ASSET_ID=$(echo "$UPLOAD_RESP" | python3 -c "
+      -F "files=@$IMG;type=image/jpeg"
+
+    if [[ "$UPLOAD_HTTP" != "201" ]]; then
+      _fail "Media upload $i failed (HTTP $UPLOAD_HTTP)"
+      _info "Response body: $UPLOAD_BODY"
+    else
+      ASSET_ID=$(echo "$UPLOAD_BODY" | python3 -c "
 import sys,json; r=json.load(sys.stdin)
 print(r['uploaded'][0]['id'])
 ")
-    [[ -n "$ASSET_ID" ]] && _pass "Media asset $i uploaded: $ASSET_ID" \
-      || _fail "Media upload $i failed"
+      if [[ -n "$ASSET_ID" ]]; then
+        _pass "Media asset $i uploaded: $ASSET_ID"
+        UPLOADED_MEDIA_IDS+=("$ASSET_ID")
+      else
+        _fail "Media upload $i: could not parse asset ID from response"
+        _info "Response body: $UPLOAD_BODY"
+      fi
+    fi
   done
+
+  # ── 2.3b Poll media processing until all assets are "ready" ──
+  # The worker processes images asynchronously; wait up to 60s before proceeding.
+  if [[ ${#UPLOADED_MEDIA_IDS[@]} -gt 0 ]]; then
+    MEDIA_POLL_MAX=12   # 12 × 5s = 60s
+    MEDIA_POLL=0
+    ALL_READY=0
+    while [[ $MEDIA_POLL -lt $MEDIA_POLL_MAX ]]; do
+      sleep 5
+      ALL_READY=1
+      for MID in "${UPLOADED_MEDIA_IDS[@]}"; do
+        MSTATUS=$(curl -sf --max-time 10 "$API_BASE_URL/api/media/$MID" \
+          -H "Authorization: Bearer $TOKEN" \
+          | python3 -c "import sys,json; print(json.load(sys.stdin)['processing_status'])" 2>/dev/null \
+          || echo "unknown")
+        if [[ "$MSTATUS" != "ready" ]]; then
+          ALL_READY=0
+          break
+        fi
+      done
+      _info "Media poll $((MEDIA_POLL+1))/$MEDIA_POLL_MAX: ready=$ALL_READY"
+      [[ "$ALL_READY" == "1" ]] && break
+      MEDIA_POLL=$((MEDIA_POLL+1))
+    done
+    if [[ "$ALL_READY" == "1" ]]; then
+      _pass "All media assets are ready"
+    else
+      _fail "Media assets did not reach 'ready' state within 60s (is the worker running?)"
+    fi
+  fi
 
   # ── 2.4 Generate + apply plan (plan_and_apply) ───────────
   PLAN_FILE="$ARTIFACTS/plan.json"
-  PLAN_RESPONSE=$(curl -sf --max-time 60 -X POST "$API_BASE_URL/api/ai/plan_and_apply" \
+  _curl_json PA_HTTP PLAN_RESPONSE \
+    --max-time 60 \
+    -X POST "$API_BASE_URL/api/ai/plan_and_apply" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
-    -d "{\"project_id\":\"$PROJECT_ID\",\"prompt\":\"$PROMPT\"}")
+    -d "{\"project_id\":\"$PROJECT_ID\",\"prompt\":\"$PROMPT\"}"
 
-  echo "$PLAN_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d.get('edit_plan',{}), indent=2))" > "$PLAN_FILE"
-
-  if echo "$PLAN_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('ok')==True"; then
-    _pass "plan_and_apply returned ok=true"
+  if [[ "$PA_HTTP" != "200" ]]; then
+    _fail "plan_and_apply HTTP error (HTTP $PA_HTTP)"
+    _info "Response body: $PLAN_RESPONSE"
   else
-    _fail "plan_and_apply failed"
+    echo "$PLAN_RESPONSE" | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+print(json.dumps(d.get('edit_plan',{}), indent=2))
+" > "$PLAN_FILE"
+
+    if echo "$PLAN_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('ok')==True" 2>/dev/null; then
+      _pass "plan_and_apply returned ok=true"
+    else
+      _fail "plan_and_apply: ok!=true in response"
+      _info "Response body: $PLAN_RESPONSE"
+    fi
   fi
 
   # ── 2.5 Validate plan schema (reuse existing validator) ──
-  if python3 -c "
+  if [[ -s "$PLAN_FILE" ]]; then
+    if python3 -c "
 import json, sys
 sys.path.insert(0, 'backend')
 from app.schemas.edit_plan import EditPlanV1
 plan = json.load(open('$PLAN_FILE'))
 EditPlanV1.model_validate(plan)
 " 2>&1; then
-    _pass "EditPlanV1 schema validation passed"
+      _pass "EditPlanV1 schema validation passed"
+    else
+      _fail "EditPlanV1 schema validation failed"
+    fi
   else
-    _fail "EditPlanV1 schema validation failed"
+    _info "Skipping schema validation (no plan file produced)"
   fi
 
   # ── 2.6 Trigger render ───────────────────────────────────
-  RENDER_RESP=$(curl -sf --max-time 30 -X POST "$API_BASE_URL/api/projects/$PROJECT_ID/render" \
+  _curl_json RENDER_HTTP RENDER_BODY \
+    --max-time 30 \
+    -X POST "$API_BASE_URL/api/projects/$PROJECT_ID/render" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
-    -d '{"type":"final"}')
-  RENDER_STATUS=$(echo "$RENDER_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))")
-  [[ "$RENDER_STATUS" == "queued" || "$RENDER_STATUS" == "running" ]] \
-    && _pass "Render job queued (status=$RENDER_STATUS)" \
-    || _fail "Render job status unexpected: $RENDER_STATUS"
+    -d '{"type":"final"}'
+
+  if [[ "$RENDER_HTTP" != "200" && "$RENDER_HTTP" != "201" && "$RENDER_HTTP" != "202" ]]; then
+    _fail "Render trigger failed (HTTP $RENDER_HTTP)"
+    _info "Response body: $RENDER_BODY"
+  else
+    RENDER_STATUS=$(echo "$RENDER_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))")
+    [[ "$RENDER_STATUS" == "queued" || "$RENDER_STATUS" == "running" ]] \
+      && _pass "Render job queued (status=$RENDER_STATUS)" \
+      || _fail "Render job status unexpected: $RENDER_STATUS"
+  fi
 
   # ── 2.7 Poll render status (120s timeout) ────────────────
   POLL_MAX=24   # 24 × 5s = 120s
@@ -165,9 +306,10 @@ EditPlanV1.model_validate(plan)
   FINAL_STATUS="unknown"
   while [[ $POLL -lt $POLL_MAX ]]; do
     sleep 5
-    FINAL_STATUS=$(curl -sf --max-time 10 "$API_BASE_URL/api/projects/$PROJECT_ID/render/final/status" \
-      -H "Authorization: Bearer $TOKEN" \
-      | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))")
+    POLL_RESP=$(curl -s --max-time 10 \
+      "$API_BASE_URL/api/projects/$PROJECT_ID/render/final/status" \
+      -H "Authorization: Bearer $TOKEN")
+    FINAL_STATUS=$(echo "$POLL_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))" 2>/dev/null || echo "unknown")
     _info "Poll $((POLL+1))/$POLL_MAX: render status=$FINAL_STATUS"
     [[ "$FINAL_STATUS" == "complete" || "$FINAL_STATUS" == "failed" ]] && break
     POLL=$((POLL+1))
@@ -181,17 +323,18 @@ EditPlanV1.model_validate(plan)
 
   # ── 2.8 Download and verify output MP4 ───────────────────
   OUTPUT_MP4="$ARTIFACTS/output.mp4"
-  curl -sf --max-time 60 "$API_BASE_URL/api/projects/$PROJECT_ID/render/final/download" \
+  DOWNLOAD_HTTP=$(curl -s --max-time 60 -w '%{http_code}' \
+    "$API_BASE_URL/api/projects/$PROJECT_ID/render/final/download" \
     -H "Authorization: Bearer $TOKEN" \
-    -o "$OUTPUT_MP4"
+    -o "$OUTPUT_MP4")
 
-  if [[ -s "$OUTPUT_MP4" ]]; then
+  if [[ "$DOWNLOAD_HTTP" == "200" && -s "$OUTPUT_MP4" ]]; then
     _pass "MP4 downloaded: $OUTPUT_MP4 ($(du -h "$OUTPUT_MP4" | cut -f1))"
   else
-    _fail "MP4 download failed or empty"
+    _fail "MP4 download failed (HTTP ${DOWNLOAD_HTTP:-unknown}) or file empty"
   fi
 
-  if command -v ffprobe &>/dev/null; then
+  if command -v ffprobe &>/dev/null && [[ -s "$OUTPUT_MP4" ]]; then
     DURATION=$(ffprobe -v quiet -print_format json -show_format "$OUTPUT_MP4" \
       | python3 -c "import sys,json; print(json.load(sys.stdin)['format']['duration'])" 2>/dev/null || echo "0")
     if python3 -c "assert float('${DURATION:-0}') > 0" 2>/dev/null; then
