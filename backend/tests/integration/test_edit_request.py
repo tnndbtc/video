@@ -97,8 +97,8 @@ class TestValidateEditRequest:
             f"/api/projects/{uuid.uuid4()}/edl/validate",
             json={"version": "1.0", "timeline": []},
         )
-        # No auth token returns 403 (Forbidden)
-        assert response.status_code == 403
+        # No auth token returns 401 (Unauthorized)
+        assert response.status_code == 401
 
     @pytest.mark.asyncio
     async def test_validate_project_not_found(
@@ -229,8 +229,8 @@ class TestSaveEditRequest:
             f"/api/projects/{uuid.uuid4()}/edl/save",
             json={"version": "1.0", "timeline": []},
         )
-        # No auth token returns 403 (Forbidden)
-        assert response.status_code == 403
+        # No auth token returns 401 (Unauthorized)
+        assert response.status_code == 401
 
     @pytest.mark.asyncio
     async def test_save_project_not_found(
@@ -285,8 +285,8 @@ class TestGetEditRequest:
     async def test_get_requires_auth(self, async_client: AsyncClient):
         """Test that get requires authentication."""
         response = await async_client.get(f"/api/projects/{uuid.uuid4()}/edl")
-        # No auth token returns 403 (Forbidden)
-        assert response.status_code == 403
+        # No auth token returns 401 (Unauthorized)
+        assert response.status_code == 401
 
     @pytest.mark.asyncio
     async def test_get_project_not_found(
@@ -335,8 +335,8 @@ class TestDeleteEditRequest:
     async def test_delete_requires_auth(self, async_client: AsyncClient):
         """Test that delete requires authentication."""
         response = await async_client.delete(f"/api/projects/{uuid.uuid4()}/edl")
-        # No auth token returns 403 (Forbidden)
-        assert response.status_code == 403
+        # No auth token returns 401 (Unauthorized)
+        assert response.status_code == 401
 
     @pytest.mark.asyncio
     async def test_delete_project_not_found(

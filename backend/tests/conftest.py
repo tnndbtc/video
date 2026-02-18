@@ -33,6 +33,7 @@ from sqlalchemy.pool import StaticPool
 # Set test environment variables before importing app modules
 os.environ["SECRET_KEY"] = "test-secret-key-for-testing-purposes-only-32chars"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ["OPENAI_API_KEY"] = ""   # force stub planner in all tests
 # Only set REDIS_URL if not already set (Docker sets it to redis://redis:6379/0)
 if "REDIS_URL" not in os.environ:
     os.environ["REDIS_URL"] = "redis://localhost:6379/0"
