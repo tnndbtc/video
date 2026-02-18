@@ -27,7 +27,9 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("ACCESS_TOKEN_EXPIRE_HOURS", "24"))
 
 # HTTP Bearer token scheme
-security = HTTPBearer()
+# auto_error=False so FastAPI does NOT emit 403 when the header is absent or
+# malformed — we raise 401 ourselves in get_current_user instead.
+security = HTTPBearer(auto_error=False)
 
 
 def hash_password(password: str) -> str:
@@ -97,7 +99,7 @@ def decode_token(token: str) -> dict:
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_async_session),
 ) -> User:
     """
@@ -121,6 +123,10 @@ async def get_current_user(
         detail={"error": "unauthorized", "message": "Invalid or expired token"},
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    # Missing / malformed Authorization header — raise 401, not 403
+    if credentials is None:
+        raise credentials_exception
 
     try:
         payload = decode_token(credentials.credentials)

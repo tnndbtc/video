@@ -98,9 +98,17 @@ if str(WORKER_DIR) not in sys.path:
 # Temporarily add backend to sys.path so backend models can import from app.core
 import importlib.util
 
-sys.path.insert(0, str(BACKEND_DIR))
+if BACKEND_DIR.exists():
+    sys.path.insert(0, str(BACKEND_DIR))
+else:
+    # Inside the worker Docker container the backend source is not mounted;
+    # the import below will be skipped and stubs used instead.
+    pass
 
 try:
+    if not BACKEND_DIR.exists():
+        raise ImportError("Backend source directory not available in this environment")
+
     # Import backend's app.core.database for Base class
     from app.core.database import Base as BackendBase
 
@@ -112,9 +120,19 @@ try:
     from app.models.timeline import Timeline
     from app.models.job import RenderJob
 
+except ImportError:
+    # Backend not available (e.g. running inside the worker container).
+    # Create a minimal declarative base so create_all() is a no-op for
+    # backend tables.  Tests that need actual backend models are gated
+    # behind the test_assets_env fixture and will be skipped automatically.
+    from sqlalchemy.orm import declarative_base as _declarative_base
+    BackendBase = _declarative_base()
+    User = Project = MediaAsset = AudioTrack = Timeline = RenderJob = None
+
 finally:
     # Remove backend from sys.path to avoid conflicts with worker's app
-    sys.path.remove(str(BACKEND_DIR))
+    if BACKEND_DIR.exists() and str(BACKEND_DIR) in sys.path:
+        sys.path.remove(str(BACKEND_DIR))
 
     # Also remove backend's 'app' from sys.modules if it was cached
     if 'app' in sys.modules:
