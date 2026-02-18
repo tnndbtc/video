@@ -245,3 +245,35 @@ class TestValidatePlanRaises:
         asset_map = make_asset_map(["a1", "a2"])
         with pytest.raises(ValueError, match="total_duration_ms mismatch"):
             validate_edit_plan(plan, asset_map)
+
+
+class TestEditPlanV1Schema:
+    """Tests for the EditPlanV1 schema contract guardrail."""
+
+    def test_ai_output_validation_guardrail(self):
+        """Raw LLM output missing required fields raises ValidationError."""
+        from pydantic import ValidationError
+
+        bad_outputs = [
+            {},                                          # totally empty
+            {"project_id": "abc"},                       # missing timeline
+            {"project_id": "abc", "timeline": {}},       # timeline missing required fields
+            {
+                "project_id": "abc",
+                "timeline": {
+                    "total_duration_ms": 2000,
+                    "segments": [
+                        {
+                            "index": 0,
+                            "media_asset_id": "x",
+                            "media_type": "image",
+                            "render_duration_ms": 2000,
+                            "source_out_ms": 0,  # violates gt=0 constraint
+                        }
+                    ],
+                },
+            },
+        ]
+        for bad in bad_outputs:
+            with pytest.raises(ValidationError):
+                EditPlanV1.model_validate(bad)

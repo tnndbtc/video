@@ -262,3 +262,18 @@ The backend validates every EditPlan before saving or rendering:
 | 422 | `validation_error` | Request body is malformed |
 | 503 | `openai_not_configured` | `OPENAI_API_KEY` not set |
 | 500 | `internal_error` | Unexpected server error |
+
+---
+
+## Contract & Validation
+
+**EditPlanV1 is a strict contract.** All AI-generated and stub plans are validated against
+the `EditPlanV1` Pydantic schema immediately after generation and again before apply.
+Invalid plans are rejected (HTTP 422/400) before any timeline or EDL write occurs.
+The backend API runs on port **8080**; the UI runs on port **3001**.
+
+Run contract tests with:
+
+```bash
+bash scripts/validate_ai_contract.sh
+```

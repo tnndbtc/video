@@ -6,10 +6,10 @@ Provides endpoints for generating, applying, and combining AI-generated edit pla
 
 import json
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,7 +42,7 @@ class PlanRequest(BaseModel):
 
 class ApplyRequest(BaseModel):
     project_id: str
-    edit_plan: EditPlanV1
+    edit_plan: Any   # parsed manually below so we control the error format
 
 
 # =============================================================================
@@ -122,7 +122,7 @@ async def ai_plan(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "plan_validation_failed", "message": str(e)},
+            detail={"error": "invalid_edit_plan", "message": str(e), "details": []},
         )
 
     return {
@@ -147,21 +147,34 @@ async def ai_apply(
     # Verify project ownership
     await _get_project_or_404(request.project_id, db, current_user)
 
+    # Parse and validate schema (explicit so we control the error format)
+    try:
+        plan = EditPlanV1.model_validate(request.edit_plan)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "invalid_edit_plan",
+                "message": "Edit plan failed schema validation",
+                "details": e.errors(),
+            },
+        )
+
     # Build asset_map
     asset_map = await _build_asset_map(request.project_id, db)
 
     # Validate
     try:
-        validate_edit_plan(request.edit_plan, asset_map)
+        validate_edit_plan(plan, asset_map)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "plan_validation_failed", "message": str(e)},
+            detail={"error": "invalid_edit_plan", "message": str(e), "details": []},
         )
 
     # Convert to EditRequest
     edit_request = convert_edit_plan_to_edit_request(
-        request.edit_plan,
+        plan,
         asset_map=asset_map,
     )
 
@@ -186,7 +199,7 @@ async def ai_apply(
         "ok": True,
         "edl_hash": edl_hash,
         "segment_count": len(edit_request.timeline),
-        "total_duration_ms": request.edit_plan.timeline.total_duration_ms,
+        "total_duration_ms": plan.timeline.total_duration_ms,
     }
 
 
@@ -223,7 +236,7 @@ async def ai_plan_and_apply(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "plan_validation_failed", "message": str(e)},
+            detail={"error": "invalid_edit_plan", "message": str(e), "details": []},
         )
 
     # Convert and save

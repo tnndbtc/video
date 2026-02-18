@@ -87,6 +87,44 @@ class TestAiPlan:
         )
 
     @pytest.mark.asyncio
+    async def test_generate_plan_stub_is_valid_editplanv1(
+        self,
+        async_client: AsyncClient,
+        auth_headers: dict,
+        test_project: dict,
+        test_db,
+    ):
+        """Test that the stub planner output passes EditPlanV1 schema validation."""
+        from app.models.project import Project
+        from app.schemas.edit_plan import EditPlanV1
+        from sqlalchemy import select
+
+        query = select(Project).where(Project.id == test_project["id"])
+        result = await test_db.execute(query)
+        project = result.scalar_one()
+
+        await create_media_asset_directly(
+            test_db, project, media_type="image", processing_status="ready"
+        )
+        await create_media_asset_directly(
+            test_db, project, media_type="image", processing_status="ready"
+        )
+        await test_db.commit()
+
+        response = await async_client.post(
+            "/api/ai/plan",
+            headers=auth_headers,
+            json={
+                "project_id": test_project["id"],
+                "prompt": "Validate schema output",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # This must not raise — proves stub output is always a valid EditPlanV1
+        EditPlanV1.model_validate(data["edit_plan"])
+
+    @pytest.mark.asyncio
     async def test_ai_plan_no_assets_returns_400(
         self,
         async_client: AsyncClient,
@@ -118,6 +156,72 @@ class TestAiApply:
             },
         )
         assert response.status_code in (401, 403)
+
+    @pytest.mark.asyncio
+    async def test_apply_plan_rejects_invalid_schema(
+        self,
+        async_client: AsyncClient,
+        auth_headers: dict,
+        test_project: dict,
+    ):
+        """Test that apply returns 422 with 'invalid_edit_plan' for schema violations."""
+        response = await async_client.post(
+            "/api/ai/apply",
+            headers=auth_headers,
+            json={
+                "project_id": test_project["id"],
+                "edit_plan": {"bad": "data"},  # missing required timeline + project_id
+            },
+        )
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert detail["error"] == "invalid_edit_plan"
+
+    @pytest.mark.asyncio
+    async def test_apply_plan_accepts_valid_schema_minimal(
+        self,
+        async_client: AsyncClient,
+        auth_headers: dict,
+        test_project: dict,
+        test_db,
+    ):
+        """Test that a minimal valid EditPlanV1 (no effects, no transitions) is accepted."""
+        from app.models.project import Project
+        from sqlalchemy import select
+
+        query = select(Project).where(Project.id == test_project["id"])
+        result = await test_db.execute(query)
+        project = result.scalar_one()
+
+        asset = await create_media_asset_directly(
+            test_db, project, media_type="image", processing_status="ready"
+        )
+        await test_db.commit()
+
+        edit_plan = {
+            "plan_version": "v1",
+            "project_id": test_project["id"],
+            "timeline": {
+                "total_duration_ms": 3000,
+                "segments": [
+                    {
+                        "index": 0,
+                        "media_asset_id": asset.id,
+                        "media_type": "image",
+                        "render_duration_ms": 3000,
+                        "source_out_ms": 3000,
+                    }
+                ],
+            },
+        }
+
+        response = await async_client.post(
+            "/api/ai/apply",
+            headers=auth_headers,
+            json={"project_id": test_project["id"], "edit_plan": edit_plan},
+        )
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
 
     @pytest.mark.asyncio
     async def test_ai_apply_saves_edit_request(

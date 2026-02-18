@@ -209,6 +209,12 @@ async def _openai_planner(
 
     client = AsyncOpenAI(api_key=openai_key)
     try:
+        from openai import AuthenticationError as OpenAIAuthError, PermissionDeniedError
+    except ImportError:
+        OpenAIAuthError = None
+        PermissionDeniedError = None
+
+    try:
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             response_format={"type": "json_object"},
@@ -231,7 +237,19 @@ async def _openai_planner(
 
         plan = EditPlanV1.model_validate(plan_data)
     except Exception as e:
-        # Convert OpenAI API errors, JSON parse errors, and Pydantic
+        # If the key is invalid/missing permissions, fall back to stub planner
+        # rather than surfacing a 400 error to the user.
+        auth_error_types = tuple(t for t in (OpenAIAuthError, PermissionDeniedError) if t)
+        if auth_error_types and isinstance(e, auth_error_types):
+            logger.warning("OpenAI auth error (%s), falling back to stub planner", e)
+            plan, metadata = await _stub_planner(project_id, constraints, db)
+            plan.warnings = (plan.warnings or []) + [
+                "OpenAI API key invalid or unauthorised — used stub planner"
+            ]
+            metadata["warnings"] = plan.warnings
+            return plan, metadata
+
+        # Convert other OpenAI API errors, JSON parse errors, and Pydantic
         # validation errors into ValueError so the endpoint returns 400
         # with a human-readable message instead of an unhandled 500.
         raise ValueError(f"AI planner error: {e}") from e
