@@ -1110,8 +1110,7 @@ Unexpected server error.
 ## AI Planner
 
 The AI Planner endpoints power the prompt-to-video pipeline. See
-[docs/ai_prompt_to_video.md](ai_prompt_to_video.md) for the full endpoint contract,
-EditPlan v1 schema, and design rationale.
+[editplan_v1.md](editplan_v1.md) for the EditPlan v1 schema reference.
 
 ### Generate EditPlan from Prompt
 
@@ -1123,11 +1122,10 @@ Content-Type: application/json
 {
   "project_id": "550e8400-e29b-41d4-a716-446655440000",
   "prompt": "Energetic montage, cut on every beat, crossfade transitions",
+  "mode": "no_audio",
   "constraints": {
-    "mode": "no_audio",
-    "target_duration_seconds": 60,
     "transition_type": "crossfade",
-    "max_clips": 20
+    "transition_duration_ms": 500
   }
 }
 ```
@@ -1137,29 +1135,61 @@ Content-Type: application/json
 ```json
 {
   "edit_plan": {
-    "version": "1.0",
-    "output": { "width": 1920, "height": 1080, "fps": 30, "format": "mp4" },
-    "timeline": [
-      { "media_id": "uuid-1", "duration": { "seconds": 3.0 } },
-      { "media_id": "uuid-2", "duration": { "seconds": 2.5 }, "transition": { "type": "crossfade", "duration_ms": 500 } }
-    ]
+    "plan_version": "v1",
+    "mode": "no_audio",
+    "project_id": "550e8400-e29b-41d4-a716-446655440000",
+    "project_settings": {
+      "output_width": 1920,
+      "output_height": 1080,
+      "output_fps": 30,
+      "transition_type": "crossfade",
+      "transition_duration_ms": 500,
+      "ken_burns_enabled": false
+    },
+    "timeline": {
+      "total_duration_ms": 3500,
+      "segments": [
+        {
+          "index": 0,
+          "media_asset_id": "asset-uuid-1",
+          "media_type": "image",
+          "render_duration_ms": 2000,
+          "source_in_ms": 0,
+          "source_out_ms": 2000,
+          "effects": {},
+          "transition_out": null
+        },
+        {
+          "index": 1,
+          "media_asset_id": "asset-uuid-2",
+          "media_type": "image",
+          "render_duration_ms": 2000,
+          "source_in_ms": 0,
+          "source_out_ms": 2000,
+          "effects": {},
+          "transition_out": null
+        }
+      ]
+    },
+    "warnings": ["stub planner: OPENAI_API_KEY not set"]
   },
-  "warnings": [],
-  "model": "gpt-4o"
+  "warnings": ["stub planner: OPENAI_API_KEY not set"],
+  "metadata": {
+    "stub": true,
+    "model": null,
+    "prompt_tokens": null,
+    "completion_tokens": null
+  }
 }
 ```
 
-**Response `503`** (OpenAI key not set -- stub plan returned for testing):
-
-```json
-{
-  "error": "openai_not_configured",
-  "message": "OPENAI_API_KEY is not set. Set it in .env to enable AI planning.",
-  "stub_plan": { "version": "1.0", "timeline": [ /* ... */ ] }
-}
-```
+**Errors:**
+- `400 Bad Request`: No ready assets, or plan validation failed
+- `404 Not Found`: Project not found or not owned by user
 
 ### Apply EditPlan to Project
+
+Validates the EditPlan, converts it to an EditRequest, and saves `edit_request.json`.
 
 ```http
 POST /api/ai/apply
@@ -1168,7 +1198,7 @@ Content-Type: application/json
 
 {
   "project_id": "550e8400-e29b-41d4-a716-446655440000",
-  "edit_plan": { /* EditPlan v1 JSON */ }
+  "edit_plan": { /* EditPlan v1 JSON (see editplan_v1.md) */ }
 }
 ```
 
@@ -1176,17 +1206,50 @@ Content-Type: application/json
 
 ```json
 {
-  "saved": true,
-  "edl_path": "derived/550e8400/edit_request.json",
-  "segment_count": 12,
-  "total_duration_ms": 58400
+  "ok": true,
+  "edl_hash": "sha256_abc123...",
+  "segment_count": 2,
+  "total_duration_ms": 4000
+}
+```
+
+**Errors:**
+- `400 Bad Request`: Plan validation failed (missing assets, duration mismatch, etc.)
+- `404 Not Found`: Project not found
+
+### Plan and Apply (Combined)
+
+Generates an EditPlan and immediately applies it in one request.
+
+```http
+POST /api/ai/plan_and_apply
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "project_id": "550e8400-e29b-41d4-a716-446655440000",
+  "prompt": "Quick montage with crossfades",
+  "constraints": { "transition_type": "crossfade" }
+}
+```
+
+**Response `200 OK`:**
+
+```json
+{
+  "ok": true,
+  "edit_plan": { /* full EditPlan v1 */ },
+  "edl_hash": "sha256_abc123...",
+  "segment_count": 3,
+  "total_duration_ms": 5000,
+  "warnings": [],
+  "metadata": { "stub": false, "model": "gpt-4o-mini" }
 }
 ```
 
 After applying, use the standard render endpoints:
 
 ```
-POST /api/projects/{id}/render          → { "type": "final" }
-GET  /api/projects/{id}/render/final/status
-GET  /api/projects/{id}/render/final/download
+POST /api/projects/{id}/render          -> { "type": "preview", "edl_hash": "..." }
+GET  /api/projects/{id}/render/preview/download
 ```

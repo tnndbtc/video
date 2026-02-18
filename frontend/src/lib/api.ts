@@ -23,9 +23,14 @@ api.interceptors.response.use(
       localStorage.removeItem('token');
       window.location.href = '/login';
     }
-    // Extract error message from response if available
+    // Extract error message from response if available.
+    // FastAPI detail can be a plain string or an object {error, message}.
     if (error.response?.data?.detail) {
-      error.message = error.response.data.detail;
+      const detail = error.response.data.detail;
+      error.message =
+        typeof detail === 'string'
+          ? detail
+          : (detail.message ?? JSON.stringify(detail));
     } else if (error.response?.data?.message) {
       error.message = error.response.data.message;
     }

@@ -6,6 +6,7 @@ interface ProjectCardProps {
   project: ProjectListItem;
   onDelete: (projectId: string) => void;
   isDeleting?: boolean;
+  onAiStitch?: () => void;
 }
 
 function getStatusColor(status: string): string {
@@ -31,7 +32,7 @@ function formatDate(dateString: string): string {
   });
 }
 
-export function ProjectCard({ project, onDelete, isDeleting }: ProjectCardProps) {
+export function ProjectCard({ project, onDelete, isDeleting, onAiStitch }: ProjectCardProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const navigate = useNavigate();
 
@@ -149,6 +150,14 @@ export function ProjectCard({ project, onDelete, isDeleting }: ProjectCardProps)
             >
               Open
             </button>
+            {onAiStitch && (
+              <button
+                onClick={onAiStitch}
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors"
+              >
+                AI Stitch
+              </button>
+            )}
             <button
               onClick={() => setShowDeleteConfirm(true)}
               className="bg-gray-700 hover:bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors"

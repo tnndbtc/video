@@ -467,7 +467,7 @@ class TestErrorHandlingE2E:
         fake_project_id = str(uuid.uuid4())
         fake_media_id = str(uuid.uuid4())
 
-        # All these should return 403 (Forbidden - no token)
+        # All these should return 401 (Unauthorized - no token)
         endpoints = [
             ("GET", "/api/projects"),
             ("POST", "/api/projects"),
@@ -498,7 +498,7 @@ class TestErrorHandlingE2E:
             elif method == "PATCH":
                 response = await async_client.patch(endpoint, json={})
 
-            assert response.status_code == 403, f"Expected 403 for {method} {endpoint}"
+            assert response.status_code == 401, f"Expected 401 for {method} {endpoint}"
 
 
 class TestConcurrencyScenarios:

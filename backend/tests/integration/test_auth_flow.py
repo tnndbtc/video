@@ -224,7 +224,7 @@ class TestProtectedEndpoints:
         """Test accessing protected endpoint without token."""
         response = await async_client.get("/api/projects")
 
-        assert response.status_code == 403  # No credentials provided
+        assert response.status_code == 401  # No credentials provided
 
     @pytest.mark.asyncio
     async def test_protected_endpoint_with_invalid_token(self, async_client: AsyncClient):
@@ -247,7 +247,7 @@ class TestProtectedEndpoints:
             headers={"Authorization": "invalid_format"},
         )
 
-        assert response.status_code == 403
+        assert response.status_code == 401
 
     @pytest.mark.asyncio
     async def test_protected_endpoint_with_valid_token(
@@ -272,8 +272,8 @@ class TestProtectedEndpoints:
             headers={"Authorization": "Bearer "},
         )
 
-        # Empty bearer token returns 403 (Forbidden) - invalid credentials
-        assert response.status_code == 403
+        # Empty bearer token returns 401 (Unauthorized) - invalid credentials
+        assert response.status_code == 401
 
 
 class TestTokenValidation:

@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { useProjects, useDeleteProject } from '../hooks/useProjects';
 import { ProjectCard } from '../components/ProjectCard';
 import { CreateProjectModal } from '../components/CreateProjectModal';
+import { AiStitchModal } from '../components/AiStitchModal';
 
 export function Dashboard() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const [aiStitchProject, setAiStitchProject] = useState<{ id: string; name: string } | null>(null);
 
   const { data: projects, isLoading, error } = useProjects();
   const deleteProject = useDeleteProject();
@@ -143,9 +145,19 @@ export function Dashboard() {
               project={project}
               onDelete={handleDeleteProject}
               isDeleting={deletingProjectId === project.id}
+              onAiStitch={() => setAiStitchProject({ id: project.id, name: project.name })}
             />
           ))}
         </div>
+      )}
+
+      {/* AI Stitch Modal */}
+      {aiStitchProject && (
+        <AiStitchModal
+          projectId={aiStitchProject.id}
+          projectName={aiStitchProject.name}
+          onClose={() => setAiStitchProject(null)}
+        />
       )}
 
       {/* Create Project Modal */}
