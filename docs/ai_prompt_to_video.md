@@ -277,3 +277,25 @@ Run contract tests with:
 ```bash
 bash scripts/validate_ai_contract.sh
 ```
+
+### E2E Round-Trip Mode
+
+When `OPENAI_API_KEY` is set (or `RUN_OPENAI_ROUNDTRIP=1`), the script also exercises the
+full live pipeline against a running backend:
+
+```bash
+# Contract tests only (no server required):
+./scripts/validate_ai_contract.sh
+
+# Full E2E with real OpenAI (requires running backend + render worker):
+OPENAI_API_KEY=sk-... ./scripts/validate_ai_contract.sh
+
+# Full E2E with stub planner (no OpenAI key required):
+RUN_OPENAI_ROUNDTRIP=1 ./scripts/validate_ai_contract.sh
+
+# Override API base URL (default: http://localhost:8080):
+API_BASE_URL=http://localhost:8080 PROMPT="Short montage" \
+  OPENAI_API_KEY=sk-... ./scripts/validate_ai_contract.sh
+```
+
+Artifacts are saved to `/tmp/video_validate/` (plan.json, output.mp4).
