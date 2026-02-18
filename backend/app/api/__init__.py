@@ -12,6 +12,7 @@ from .edit_request import router as edit_request_router
 from .media import router as media_router
 from .projects import router as projects_router
 from .timeline import router as timeline_router
+from .ai import router as ai_router
 from .render import router as render_router
 
 # Main API router that includes all sub-routers
@@ -38,8 +39,12 @@ api_router.include_router(render_router, prefix="/projects", tags=["render"])
 # Include EditRequest (EDL v1) routes (nested under projects)
 api_router.include_router(edit_request_router, prefix="/projects", tags=["edl"])
 
+# Include AI planner routes
+api_router.include_router(ai_router, prefix="/ai", tags=["ai"])
+
 __all__ = [
     "api_router",
+    "ai_router",
     "auth_router",
     "audio_router",
     "edit_request_router",

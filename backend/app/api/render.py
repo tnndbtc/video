@@ -370,6 +370,19 @@ async def start_render(
             if project.timeline_media_ids:
                 render_plan["timeline_media_ids"] = project.timeline_media_ids
 
+            # Auto-detect AI plan: if edit_request.json was saved by the AI planner
+            # and no explicit rule_text / video_length_seconds was given, use it so
+            # the worker honours the AI-generated segment durations instead of
+            # auto-generating its own timeline.
+            if not request.rule_text and not request.video_length_seconds:
+                edit_request_auto_path = derived_dir / "edit_request.json"
+                if edit_request_auto_path.exists():
+                    render_plan = {"use_edit_request": True}
+                    logger.info(
+                        f"Auto-detected edit_request.json for project {project_id}; "
+                        "using AI EditRequest mode"
+                    )
+
         # Save render_plan to filesystem
         render_plan_path = derived_dir / "render_plan.json"
         with open(render_plan_path, "w") as f:

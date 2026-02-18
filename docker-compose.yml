@@ -40,6 +40,7 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - STORAGE_PATH=/data
       - MAX_UPLOAD_SIZE=524288000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
       - beatstitch-data:/data
     depends_on:
