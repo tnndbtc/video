@@ -772,9 +772,10 @@ run_tests() {
     echo "  3) Worker tests only"
     echo "  4) Worker golden tests only"
     echo "  5) Backend unit tests only"
+    echo "  6) AI contract tests (EditPlanV1 schema + AI endpoints + optional E2E round-trip)"
     echo "  0) Back to main menu"
     echo ""
-    read -p "Enter choice [0-5]: " test_choice
+    read -p "Enter choice [0-6]: " test_choice
 
     case $test_choice in
         1)
@@ -783,7 +784,7 @@ run_tests() {
 
             # Ensure pytest is available in both containers
             print_info "Installing pytest in containers..."
-            $compose_cmd exec -T backend pip install pytest pytest-asyncio -q 2>/dev/null || true
+            $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
             $compose_cmd exec -T worker pip install pytest -q 2>/dev/null || true
 
             # Run backend tests
@@ -809,7 +810,7 @@ run_tests() {
             print_header "Running Backend Tests"
             echo ""
             # Ensure pytest is available
-            $compose_cmd exec -T backend pip install pytest pytest-asyncio -q 2>/dev/null || true
+            $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
             $compose_cmd exec -T backend python -m pytest tests/ -v --tb=short 2>&1
             ;;
         3)
@@ -832,8 +833,43 @@ run_tests() {
             print_header "Running Backend Unit Tests"
             echo ""
             # Ensure pytest is available
-            $compose_cmd exec -T backend pip install pytest pytest-asyncio -q 2>/dev/null || true
+            $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
             $compose_cmd exec -T backend python -m pytest tests/unit/ -v --tb=short 2>&1
+            ;;
+        6)
+            print_header "AI Contract Tests (EditPlanV1 schema + AI endpoints + optional E2E)"
+            echo ""
+
+            # ── Part A: pytest contract tests (unit + integration) ──────────────
+            print_info "Running AI pytest contract tests inside backend container..."
+            echo ""
+            $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
+            if $compose_cmd exec -T backend python -m pytest \
+                    tests/integration/test_ai_endpoints.py \
+                    tests/unit/test_edit_plan.py \
+                    -v --tb=short 2>&1; then
+                print_success "AI pytest contract tests passed!"
+            else
+                print_warning "Some AI pytest contract tests failed"
+            fi
+            echo ""
+
+            # ── Part B: validate_ai_contract.sh (contract + optional E2E) ──────
+            print_info "Running validate_ai_contract.sh..."
+            if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+                print_info "OPENAI_API_KEY detected — E2E round-trip will run."
+            elif [[ "${RUN_OPENAI_ROUNDTRIP:-0}" == "1" ]]; then
+                print_info "RUN_OPENAI_ROUNDTRIP=1 — E2E round-trip with stub planner will run."
+            else
+                print_info "No OPENAI_API_KEY or RUN_OPENAI_ROUNDTRIP=1 set — contract-only mode."
+                print_info "  To run E2E: RUN_OPENAI_ROUNDTRIP=1 ./setup.sh  (or set OPENAI_API_KEY)"
+            fi
+            echo ""
+            if bash scripts/validate_ai_contract.sh 2>&1; then
+                print_success "validate_ai_contract.sh passed!"
+            else
+                print_warning "validate_ai_contract.sh reported failures (see above)"
+            fi
             ;;
         0)
             return 0
@@ -849,6 +885,13 @@ run_tests() {
 # =============================================================================
 
 main() {
+    # If docker isn't accessible in the current session (user is in the docker
+    # group but the group hasn't been applied yet), re-exec the whole script
+    # under 'sg docker' so every option works without manual 'newgrp docker'.
+    if ! docker_accessible_without_sudo; then
+        reexec_with_docker_group
+    fi
+
     clear
     echo ""
     echo -e "${CYAN}  ____             _   ____  _   _ _       _     ${NC}"
