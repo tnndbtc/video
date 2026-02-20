@@ -37,6 +37,7 @@ from schemas.render_output import (
     Lineage,
     OutputArtifact,
     OutputHashes,
+    Producer,
     Provenance,
     RenderOutput,
 )
@@ -114,6 +115,23 @@ class PreviewRenderer:
     # Public
     # ------------------------------------------------------------------
 
+    @classmethod
+    def from_files(
+        cls,
+        manifest_path: Path,
+        plan_path: Path,
+        **kwargs,
+    ) -> "PreviewRenderer":
+        """Load manifest + plan from JSON files; raise on missing files."""
+        for path in (manifest_path, plan_path):
+            if not Path(path).exists():
+                raise FileNotFoundError(
+                    f"ERROR: missing required input: {Path(path).name}"
+                )
+        manifest = AssetManifest.model_validate_json(Path(manifest_path).read_text())
+        plan = RenderPlan.model_validate_json(Path(plan_path).read_text())
+        return cls(manifest, plan, **kwargs)
+
     def render(self) -> RenderOutput:
         """
         Execute the full render pipeline and return a RenderOutput.
@@ -170,7 +188,8 @@ class PreviewRenderer:
             encoder="libx264",   # Phase-0 constant
         )
         result = RenderOutput(
-            schema_version="1.0.0",
+            schema_version="0.0.1",
+            schema_id="RenderOutput",
             output_id=self._derived_id,   # stable: sha256(manifest_hash:plan_hash)
             request_id=self.request_id,
             render_plan_ref=self.plan.asset_manifest_ref,
@@ -207,6 +226,7 @@ class PreviewRenderer:
             ],
             effective_settings=effective,
             inputs_digest=self._compute_inputs_digest(effective),
+            producer=Producer(),
         )
 
         output_json = self.output_dir / "render_output.json"
@@ -235,7 +255,8 @@ class PreviewRenderer:
             encoder="libx264",
         )
         result = RenderOutput(
-            schema_version="1.0.0",
+            schema_version="0.0.1",
+            schema_id="RenderOutput",
             output_id=self._derived_id,
             request_id=self.request_id,
             # self.plan.asset_manifest_ref carries the render-plan file URI
@@ -249,7 +270,7 @@ class PreviewRenderer:
             provenance=Provenance(
                 render_profile=self.plan.profile,
                 timing_lock_hash=self.plan.timing_lock_hash,
-                rendered_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                rendered_at="dry-run",
                 ffmpeg_version="dry-run",
                 placeholder_count=0,
             ),
@@ -260,6 +281,7 @@ class PreviewRenderer:
             outputs=[],
             effective_settings=effective,
             inputs_digest=self._compute_inputs_digest(effective),
+            producer=Producer(),
         )
         self.output_dir.mkdir(parents=True, exist_ok=True)
         output_json = self.output_dir / "render_output.json"

@@ -98,6 +98,24 @@ class TestDryRun:
 
         assert _get_digest(tmp_path / "a") == _get_digest(tmp_path / "b")
 
+    def test_schema_metadata(self, dry_result):
+        assert dry_result.schema_id == "RenderOutput"
+        assert dry_result.schema_version == "0.0.1"
+        assert dry_result.producer.name == "PreviewRenderer"
+
+    def test_dry_run_json_bytes_deterministic(self, tmp_path):
+        """rendered_at is now 'dry-run' so full JSON bytes must be identical."""
+        def _bytes(out):
+            PreviewRenderer(
+                _make_manifest(), _make_plan(),
+                output_dir=out,
+                asset_manifest_ref=self._ASSET_MANIFEST_REF,
+                dry_run=True,
+            ).render()
+            return (out / "render_output.json").read_bytes()
+
+        assert _bytes(tmp_path / "a") == _bytes(tmp_path / "b")
+
 
 @pytest.mark.slow
 class TestNonRegression:
@@ -153,3 +171,41 @@ class TestNonRegression:
     def test_inputs_digest_present_in_full_render(self, minimal_render):
         result, _ = minimal_render
         assert len(result.inputs_digest) == 64
+        assert result.schema_id == "RenderOutput"
+        assert result.schema_version == "0.0.1"
+
+
+class TestFromFiles:
+
+    def test_missing_manifest_raises(self, tmp_path):
+        plan_file = tmp_path / "plan.json"
+        plan_file.write_text(_make_plan().model_dump_json())
+        with pytest.raises(FileNotFoundError, match="ERROR: missing required input: manifest.json"):
+            PreviewRenderer.from_files(
+                manifest_path=tmp_path / "manifest.json",
+                plan_path=plan_file,
+                output_dir=tmp_path / "out",
+            )
+
+    def test_missing_plan_raises(self, tmp_path):
+        manifest_file = tmp_path / "manifest.json"
+        manifest_file.write_text(_make_manifest().model_dump_json())
+        with pytest.raises(FileNotFoundError, match="ERROR: missing required input: plan.json"):
+            PreviewRenderer.from_files(
+                manifest_path=manifest_file,
+                plan_path=tmp_path / "plan.json",
+                output_dir=tmp_path / "out",
+            )
+
+    def test_valid_files_produces_renderer(self, tmp_path):
+        manifest_file = tmp_path / "manifest.json"
+        plan_file = tmp_path / "plan.json"
+        manifest_file.write_text(_make_manifest().model_dump_json())
+        plan_file.write_text(_make_plan().model_dump_json())
+        r = PreviewRenderer.from_files(
+            manifest_path=manifest_file,
+            plan_path=plan_file,
+            output_dir=tmp_path / "out",
+            dry_run=True,
+        )
+        assert isinstance(r, PreviewRenderer)

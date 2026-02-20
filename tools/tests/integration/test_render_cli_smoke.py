@@ -109,7 +109,7 @@ class TestRenderCliSmoke:
 
     def test_stdout_is_valid_json(self, cli_out):
         data = json.loads(cli_out["stdout"])
-        assert data["schema_version"] == "1.0.0"
+        assert data["schema_version"] == "0.0.1"
         assert "output_id" in data
 
     # -----------------------------------------------------------------------

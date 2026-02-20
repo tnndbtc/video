@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class OutputHashes(BaseModel):
@@ -63,12 +63,19 @@ class EffectiveSettings(BaseModel):
     encoder: str      # e.g. "libx264"
 
 
+class Producer(BaseModel):
+    """Identifies the software that produced this RenderOutput."""
+    name: str = "PreviewRenderer"
+    version: str = "0.0.1"
+
+
 class RenderOutput(BaseModel):
     """
     RenderOutput — result of one renderer invocation.
     Canonical schema §5.9. Written to render_output.json alongside the .mp4 and .srt.
     """
-    schema_version: str = "1.0.0"
+    schema_version: str = "0.0.1"
+    schema_id: str = "RenderOutput"
     output_id: str
     request_id: str
     render_plan_ref: str
@@ -82,3 +89,4 @@ class RenderOutput(BaseModel):
     outputs: list[OutputArtifact] = []
     effective_settings: Optional[EffectiveSettings] = None
     inputs_digest: str = ""  # SHA-256 of canonical plan+manifest+effective_settings
+    producer: Producer = Field(default_factory=Producer)

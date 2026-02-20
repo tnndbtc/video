@@ -203,7 +203,9 @@ class TestPreviewGolden:
         assert from_disk.lineage.asset_manifest_hash == result.lineage.asset_manifest_hash
         assert from_disk.hashes.video_sha256 == result.hashes.video_sha256
         assert from_disk.provenance.render_profile == "preview_local"
-        assert from_disk.schema_version == "1.0.0"
+        assert from_disk.schema_version == "0.0.1"
+        assert from_disk.schema_id == "RenderOutput"
+        assert from_disk.producer.name == "PreviewRenderer"
 
     def test_timing_lock_hash_mismatch_raises(self, sample_manifest, tmp_path: Path):
         """Mismatched timing_lock_hash must raise ValueError before any ffmpeg call."""

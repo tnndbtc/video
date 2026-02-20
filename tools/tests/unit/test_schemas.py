@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from schemas.asset_manifest import AssetManifest, Shot, VisualAsset, VOLine, SFXItem
 from schemas.render_plan import FallbackConfig, RenderPlan, Resolution
-from schemas.render_output import Lineage, OutputHashes, Provenance, RenderOutput
+from schemas.render_output import Lineage, OutputHashes, Producer, Provenance, RenderOutput
 
 
 # ===========================================================================
@@ -232,8 +232,20 @@ class TestRenderOutput:
 
     def test_valid(self):
         ro = self._make_valid()
-        assert ro.schema_version == "1.0.0"
+        assert ro.schema_version == "0.0.1"
+        assert ro.schema_id == "RenderOutput"
+        assert ro.producer.name == "PreviewRenderer"
+        assert ro.producer.version == "0.0.1"
         assert ro.audio_stems_uri is None
+
+    def test_producer_defaults(self):
+        ro = self._make_valid()
+        assert ro.producer.name == "PreviewRenderer"
+        assert ro.producer.version == "0.0.1"
+
+    def test_schema_id_default(self):
+        ro = self._make_valid()
+        assert ro.schema_id == "RenderOutput"
 
     def test_roundtrip_json(self):
         ro = self._make_valid()
