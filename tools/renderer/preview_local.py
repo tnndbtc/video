@@ -163,6 +163,12 @@ class PreviewRenderer:
         captions_hash = _sha256_text(output_srt.read_text(encoding="utf-8"))
 
         # Step 5 — assemble RenderOutput.
+        effective = EffectiveSettings(
+            resolution=f"{self.plan.resolution.width}x{self.plan.resolution.height}",
+            fps=str(self.plan.fps),
+            audio_rate="aac" if _resolve_music(self.manifest) else "none",
+            encoder="libx264",   # Phase-0 constant
+        )
         result = RenderOutput(
             schema_version="1.0.0",
             output_id=self._derived_id,   # stable: sha256(manifest_hash:plan_hash)
@@ -199,12 +205,8 @@ class PreviewRenderer:
                     sha256=captions_hash,
                 ),
             ],
-            effective_settings=EffectiveSettings(
-                resolution=f"{self.plan.resolution.width}x{self.plan.resolution.height}",
-                fps=str(self.plan.fps),
-                audio_rate="aac" if _resolve_music(self.manifest) else "none",
-                encoder="libx264",   # Phase-0 constant
-            ),
+            effective_settings=effective,
+            inputs_digest=self._compute_inputs_digest(effective),
         )
 
         output_json = self.output_dir / "render_output.json"
@@ -257,12 +259,28 @@ class PreviewRenderer:
             ),
             outputs=[],
             effective_settings=effective,
+            inputs_digest=self._compute_inputs_digest(effective),
         )
         self.output_dir.mkdir(parents=True, exist_ok=True)
         output_json = self.output_dir / "render_output.json"
         output_json.write_text(result.model_dump_json(indent=2), encoding="utf-8")
         logger.info("Dry-run complete → render_output.json written (no mp4/srt produced)")
         return result
+
+    def _compute_inputs_digest(self, effective: EffectiveSettings) -> str:
+        """SHA-256 over canonical JSON of plan + manifest + effective_settings.
+
+        Same canonicalisation as _canonical_json_hash(): sorted keys, compact
+        separators, UTF-8.  Order is fixed: plan → manifest → effective_settings.
+        """
+        h = hashlib.sha256()
+        for obj in (self.plan, self.manifest, effective):
+            blob = json.dumps(
+                obj.model_dump(), sort_keys=True,
+                separators=(",", ":"), ensure_ascii=False,
+            )
+            h.update(blob.encode("utf-8"))
+        return h.hexdigest()
 
     # ------------------------------------------------------------------
     # Internal: asset resolution

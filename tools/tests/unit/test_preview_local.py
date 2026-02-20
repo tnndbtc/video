@@ -6,7 +6,7 @@ from pathlib import Path
 TOOLS_ROOT = Path(__file__).resolve().parents[2]
 import sys; sys.path.insert(0, str(TOOLS_ROOT))
 
-from schemas.asset_manifest import AssetManifest, Shot
+from schemas.asset_manifest import AssetManifest, Shot, VisualAsset
 from schemas.render_plan import FallbackConfig, RenderPlan, Resolution
 from renderer.preview_local import PreviewRenderer
 
@@ -75,3 +75,81 @@ class TestDryRun:
             dry_run=True,
         ).render()
         assert {f.name for f in out.iterdir()} == {"render_output.json"}
+
+    def test_inputs_digest_is_hex(self, dry_result):
+        assert len(dry_result.inputs_digest) == 64
+        assert all(c in "0123456789abcdef" for c in dry_result.inputs_digest)
+
+    def test_inputs_digest_pinned(self, dry_result):
+        assert dry_result.inputs_digest == "e4888c424d621df96627e007e46a727a07de4083d7519e4b0e9c94794bec31a2"
+
+    def test_inputs_digest_determinism(self, tmp_path):
+        import json as _json
+
+        def _get_digest(out):
+            PreviewRenderer(
+                _make_manifest(), _make_plan(),
+                output_dir=out,
+                asset_manifest_ref=self._ASSET_MANIFEST_REF,
+                dry_run=True,
+            ).render()
+            data = _json.loads((out / "render_output.json").read_bytes())
+            return data["inputs_digest"]
+
+        assert _get_digest(tmp_path / "a") == _get_digest(tmp_path / "b")
+
+
+@pytest.mark.slow
+class TestNonRegression:
+    """Verify Wave-2 does not change mp4/srt bytes for identical inputs."""
+
+    @pytest.fixture(scope="class")
+    def minimal_render(self, tmp_path_factory, require_ffmpeg):
+        try:
+            from PIL import Image
+        except ImportError:
+            pytest.skip("Pillow not installed")
+
+        assets = tmp_path_factory.mktemp("assets")
+        out    = tmp_path_factory.mktemp("out")
+        # 1-shot, 500 ms, solid red PNG
+        img = Image.new("RGB", (1280, 720), color=(200, 60, 60))
+        png = assets / "s1.png"
+        img.save(png, compress_level=9, optimize=False)
+        manifest = AssetManifest(
+            manifest_id="nr-m", project_id="nr-p",
+            shotlist_ref="file:///sl.json",
+            timing_lock_hash=_TIMING,
+            shots=[Shot(
+                shot_id="s1", duration_ms=500,
+                visual_assets=[VisualAsset(asset_id="a1", asset_uri=png.as_uri())],
+            )],
+        )
+        plan = RenderPlan(
+            plan_id="nr-pl", project_id="nr-p",
+            profile="preview_local",
+            resolution=Resolution(width=1280, height=720, aspect="16:9"),
+            fps=24,
+            asset_manifest_ref="file:///render_plan.json",
+            timing_lock_hash=_TIMING,
+            fallback=FallbackConfig(),
+            asset_resolutions={"a1": png.as_uri()},
+        )
+        result = PreviewRenderer(
+            manifest, plan, output_dir=out,
+            asset_manifest_ref="file:///asset_manifest.json",
+        ).render()
+        return result, out
+
+    def test_mp4_sha256_unchanged(self, minimal_render):
+        result, out = minimal_render
+        assert result.hashes.video_sha256 == "d5524d393dd582a8f6e608390080f4c805c00c93a40ae39fe26466a1b2d7c6aa"
+
+    def test_srt_sha256_unchanged(self, minimal_render):
+        result, out = minimal_render
+        # No VO lines → SRT is written empty; captions_sha256 is SHA-256 of ""
+        assert result.hashes.captions_sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+    def test_inputs_digest_present_in_full_render(self, minimal_render):
+        result, _ = minimal_render
+        assert len(result.inputs_digest) == 64

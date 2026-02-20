@@ -81,3 +81,4 @@ class RenderOutput(BaseModel):
     lineage: Lineage
     outputs: list[OutputArtifact] = []
     effective_settings: Optional[EffectiveSettings] = None
+    inputs_digest: str = ""  # SHA-256 of canonical plan+manifest+effective_settings
