@@ -240,25 +240,26 @@ class TestRenderOutput:
         ro2 = RenderOutput.model_validate_json(ro.model_dump_json())
         assert ro2 == ro
 
-    def test_missing_video_uri_raises(self):
-        with pytest.raises(ValidationError):
-            RenderOutput(  # type: ignore[call-arg]
-                output_id="o",
-                request_id="r",
-                render_plan_ref="file:///p.json",
-                # video_uri missing
-                hashes=OutputHashes(video_sha256="a" * 64),
-                provenance=Provenance(
-                    render_profile="preview_local",
-                    timing_lock_hash="sha256:z",
-                    rendered_at="2026-01-01T00:00:00Z",
-                    ffmpeg_version="6.1",
-                ),
-                lineage=Lineage(
-                    asset_manifest_hash="c" * 64,
-                    render_plan_hash="d" * 64,
-                ),
-            )
+    def test_missing_video_uri_defaults_to_none(self):
+        # video_uri is Optional to support dry-run mode (no mp4 produced).
+        ro = RenderOutput(  # type: ignore[call-arg]
+            output_id="o",
+            request_id="r",
+            render_plan_ref="file:///p.json",
+            # video_uri intentionally omitted — must default to None
+            hashes=OutputHashes(video_sha256="a" * 64),
+            provenance=Provenance(
+                render_profile="preview_local",
+                timing_lock_hash="sha256:z",
+                rendered_at="2026-01-01T00:00:00Z",
+                ffmpeg_version="6.1",
+            ),
+            lineage=Lineage(
+                asset_manifest_hash="c" * 64,
+                render_plan_hash="d" * 64,
+            ),
+        )
+        assert ro.video_uri is None
 
     def test_canonical_field_names(self):
         """§5.9 canonical field names are present."""
