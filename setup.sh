@@ -224,6 +224,25 @@ install_requirements() {
         fi
     fi
 
+    # ── Python packages ───────────────────────────────────────────────────────
+    local req_file="$SCRIPT_DIR/tools/requirements.txt"
+    if [[ -f "$req_file" ]]; then
+        print_info "Installing Python packages from tools/requirements.txt ..."
+        local pip_cmd
+        if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+            pip_cmd="$VIRTUAL_ENV/bin/pip"
+        else
+            pip_cmd="pip3"
+        fi
+        if $pip_cmd install -r "$req_file"; then
+            print_success "Python packages installed"
+        else
+            print_warning "pip install failed — check that pip/virtualenv is available"
+        fi
+    else
+        print_info "No tools/requirements.txt found — skipping Python packages"
+    fi
+
     echo ""
     print_success "All requirements installed!"
     echo ""
