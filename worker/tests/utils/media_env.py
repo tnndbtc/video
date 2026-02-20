@@ -63,18 +63,70 @@ def get_asset_path(asset_type: str, filename: str) -> Path:
 
 
 def skip_if_assets_missing():
-    """Pytest decorator to skip tests if VIDEO_TEST_ASSETS not available.
+    """Pytest decorator to skip or fail tests if VIDEO_TEST_ASSETS not available.
+
+    Behaviour depends on environment:
+    - Assets present → no-op (tests run normally)
+    - Assets missing + CI (CI=true or GITHUB_ACTIONS=true) → each test calls
+      pytest.fail() so the missing-assets problem is never silently hidden
+    - Assets missing + not CI → pytest.mark.skipif skip with instructions
 
     Usage:
         @skip_if_assets_missing()
         def test_something():
             ...
+
+        @skip_if_assets_missing()
+        class TestSomething:
+            def test_foo(self): ...
     """
+    import functools
+
     assets_path = get_video_test_assets_path()
-    return pytest.mark.skipif(
-        assets_path is None,
-        reason="VIDEO_TEST_ASSETS environment variable not set or directory doesn't exist"
+    is_ci = (
+        os.environ.get("CI", "").lower() == "true"
+        or os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
     )
+    RUN_CMD = "./scripts/run_integration_render_real.sh"
+
+    if assets_path is not None:
+        def _noop(cls_or_fn):
+            return cls_or_fn
+        return _noop
+
+    skip_msg = (
+        f"VIDEO_TEST_ASSETS not set or directory missing. "
+        f"Run: {RUN_CMD}"
+    )
+    fail_msg = (
+        f"[CI] VIDEO_TEST_ASSETS not set. "
+        f"Run: bash {RUN_CMD}"
+    )
+
+    if is_ci:
+        def _ci_fail_decorator(cls_or_fn):
+            if isinstance(cls_or_fn, type):
+                # Wrap every test method on the class
+                for name in list(vars(cls_or_fn)):
+                    if name.startswith("test") and callable(getattr(cls_or_fn, name)):
+                        orig = getattr(cls_or_fn, name)
+
+                        @functools.wraps(orig)
+                        def _fail(*a, _m=fail_msg, **kw):
+                            pytest.fail(_m)
+
+                        setattr(cls_or_fn, name, _fail)
+                return cls_or_fn
+
+            @functools.wraps(cls_or_fn)
+            def _wrap(*a, **kw):
+                pytest.fail(fail_msg)
+
+            return _wrap
+
+        return _ci_fail_decorator
+    else:
+        return pytest.mark.skipif(True, reason=skip_msg)
 
 
 def list_available_assets() -> dict[str, list[Path]]:

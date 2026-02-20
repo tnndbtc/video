@@ -62,9 +62,12 @@ def build_srt(manifest: "AssetManifest") -> str:
             if abs_end - abs_start < _MIN_CAPTION_DURATION_MS:
                 abs_end = abs_start + _MIN_CAPTION_DURATION_MS
 
-            # Format: "SPEAKER: text" when speaker_id is present.
+            # Format: "speaker_id: text" when speaker_id is present.
+            # speaker_id is preserved as-is (no forced upper-case);
+            # callers that want ALL-CAPS labels should upper-case the
+            # speaker_id value in the AssetManifest before rendering.
             label = (
-                f"{vo.speaker_id.upper()}: {vo.text}"
+                f"{vo.speaker_id}: {vo.text}"
                 if vo.speaker_id
                 else vo.text
             )

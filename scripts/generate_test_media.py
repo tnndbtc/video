@@ -51,6 +51,9 @@ def create_test_image(output_path: Path, color: str, width: int = 1920, height: 
         width: Image width in pixels
         height: Image height in pixels
     """
+    if output_path.exists():
+        print(f"  Skipping {output_path.name} (already exists)")
+        return
     print(f"  Creating {output_path.name} ({color})...")
 
     cmd = [
@@ -76,6 +79,9 @@ def create_test_video(output_path: Path, duration: int = 5, width: int = 1920, h
         height: Video height in pixels
         fps: Frames per second
     """
+    if output_path.exists():
+        print(f"  Skipping {output_path.name} (already exists)")
+        return
     print(f"  Creating {output_path.name} ({duration}s test pattern)...")
 
     cmd = [
@@ -101,6 +107,9 @@ def create_test_audio(output_path: Path, duration: int = 60, frequency: int = 10
         duration: Audio duration in seconds
         frequency: Sine wave frequency in Hz
     """
+    if output_path.exists():
+        print(f"  Skipping {output_path.name} (already exists)")
+        return
     print(f"  Creating {output_path.name} ({duration}s sine wave)...")
 
     cmd = [
@@ -197,11 +206,19 @@ Examples:
         help="Output directory for test assets (default: $VIDEO_TEST_ASSETS)"
     )
 
+    parser.add_argument(
+        "--out",
+        dest="output_dir_flag",
+        help="Output directory for test assets (alternative to positional arg)",
+    )
+
     args = parser.parse_args()
 
-    # Determine output directory
+    # Determine output directory — priority: positional arg → --out → $VIDEO_TEST_ASSETS → error
     if args.output_dir:
         output_dir = Path(args.output_dir)
+    elif args.output_dir_flag:
+        output_dir = Path(args.output_dir_flag)
     elif "VIDEO_TEST_ASSETS" in os.environ:
         output_dir = Path(os.environ["VIDEO_TEST_ASSETS"])
     else:
@@ -209,6 +226,7 @@ Examples:
         print()
         print("Please provide output directory:")
         print("  python scripts/generate_test_media.py /path/to/test_assets")
+        print("  python scripts/generate_test_media.py --out /path/to/test_assets")
         print()
         print("Or set VIDEO_TEST_ASSETS environment variable:")
         print("  export VIDEO_TEST_ASSETS=/path/to/test_assets")

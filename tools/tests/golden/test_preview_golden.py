@@ -184,7 +184,7 @@ class TestPreviewGolden:
         srt_path = out / "output.srt"
         assert srt_path.exists()
         content = srt_path.read_text(encoding="utf-8")
-        assert "NARRATOR:" in content
+        assert "narrator:" in content   # speaker_id preserved as-is (no .upper())
         assert "Hello world" in content
         assert "Goodbye" in content
 

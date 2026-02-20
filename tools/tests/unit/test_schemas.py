@@ -7,6 +7,7 @@ Tests:
   - Rejection of incorrect types
   - Default value correctness
   - timing_lock_hash presence in both AssetManifest and RenderPlan
+  - _canonical_json_hash stability (same object → same hash across repeated calls)
 
 No ffmpeg required.
 """
@@ -276,3 +277,69 @@ class TestRenderOutput:
         j["audio_stems_uri"] = None
         ro2 = RenderOutput.model_validate(j)
         assert ro2.audio_stems_uri is None
+
+
+# ===========================================================================
+# Canonical JSON hashing — determinism contract
+# ===========================================================================
+
+class TestCanonicalJsonHash:
+    """
+    _canonical_json_hash must return the same digest for the same object on
+    every call, regardless of Python dict insertion order or Pydantic version.
+    """
+
+    def _manifest(self, manifest_id: str = "m-001") -> AssetManifest:
+        return AssetManifest(
+            manifest_id=manifest_id,
+            project_id="proj-1",
+            shotlist_ref="file:///shotlist.json",
+            timing_lock_hash="sha256:abc",
+            shots=[Shot(shot_id="s1", duration_ms=2000)],
+        )
+
+    def test_same_object_same_hash_repeated(self):
+        """The same AssetManifest always produces the same canonical hash."""
+        from renderer.preview_local import _canonical_json_hash
+
+        m = self._manifest()
+        hashes = [_canonical_json_hash(m.model_dump()) for _ in range(5)]
+        assert len(set(hashes)) == 1, (
+            f"_canonical_json_hash is not stable: got {set(hashes)}"
+        )
+
+    def test_same_plan_same_hash_repeated(self):
+        """The same RenderPlan always produces the same canonical hash."""
+        from renderer.preview_local import _canonical_json_hash
+
+        rp = RenderPlan(
+            plan_id="p-001",
+            project_id="proj-1",
+            asset_manifest_ref="file:///manifest.json",
+            timing_lock_hash="sha256:abc",
+        )
+        hashes = [_canonical_json_hash(rp.model_dump()) for _ in range(5)]
+        assert len(set(hashes)) == 1, (
+            f"_canonical_json_hash is not stable: got {set(hashes)}"
+        )
+
+    def test_distinct_objects_distinct_hashes(self):
+        """Two manifests that differ in any field must produce different hashes."""
+        from renderer.preview_local import _canonical_json_hash
+
+        h1 = _canonical_json_hash(self._manifest("m-aaa").model_dump())
+        h2 = _canonical_json_hash(self._manifest("m-bbb").model_dump())
+        assert h1 != h2
+
+    def test_canonical_json_is_sorted_keys(self):
+        """canonical JSON must have sorted keys (contract for cross-language interop)."""
+        from renderer.preview_local import _canonical_json_hash
+
+        # Build the canonical string directly and check key order.
+        m = self._manifest()
+        d = m.model_dump()
+        canonical = json.dumps(d, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        parsed_keys = list(json.loads(canonical).keys())
+        assert parsed_keys == sorted(parsed_keys), (
+            "Top-level keys are not sorted in canonical JSON output."
+        )

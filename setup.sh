@@ -773,9 +773,10 @@ run_tests() {
     echo "  4) Worker golden tests only"
     echo "  5) Backend unit tests only"
     echo "  6) AI contract tests (EditPlanV1 schema + AI endpoints + optional E2E round-trip)"
+    echo "  7) Worker render_real integration tests (host, generates assets)"
     echo "  0) Back to main menu"
     echo ""
-    read -p "Enter choice [0-6]: " test_choice
+    read -p "Enter choice [0-7]: " test_choice
 
     case $test_choice in
         1)
@@ -870,6 +871,13 @@ run_tests() {
             else
                 print_warning "validate_ai_contract.sh reported failures (see above)"
             fi
+            ;;
+        7)
+            print_header "Running Worker render_real Integration Tests"
+            echo ""
+            print_info "Generating test assets and running host-side render_real tests..."
+            echo ""
+            bash "${SCRIPT_DIR}/scripts/run_integration_render_real.sh"
             ;;
         0)
             return 0

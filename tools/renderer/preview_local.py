@@ -26,7 +26,6 @@ import datetime
 import hashlib
 import json
 import logging
-import uuid
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -35,7 +34,7 @@ from schemas.asset_manifest import AssetManifest, Shot
 from schemas.render_plan import RenderPlan
 from schemas.render_output import Lineage, OutputHashes, Provenance, RenderOutput
 from renderer.captions import write_srt
-from renderer.ffmpeg_runner import FFmpegError, get_ffmpeg_version, run_ffmpeg
+from renderer.ffmpeg_runner import FFmpegError, run_ffmpeg, validate_ffmpeg
 from renderer.placeholder import generate_placeholder
 
 logger = logging.getLogger(__name__)
@@ -84,7 +83,19 @@ class PreviewRenderer:
         self.manifest = manifest
         self.plan = plan
         self.output_dir = Path(output_dir)
-        self.request_id = request_id or str(uuid.uuid4())
+
+        # Pre-compute canonical lineage hashes once; reused by render() to
+        # avoid double-serialisation and to derive stable IDs.
+        self._manifest_hash = _canonical_json_hash(self.manifest.model_dump())
+        self._plan_hash = _canonical_json_hash(self.plan.model_dump())
+        # Stable render/request identity derived from inputs, not a random UUID.
+        self._derived_id = hashlib.sha256(
+            f"{self._manifest_hash}:{self._plan_hash}".encode("utf-8")
+        ).hexdigest()
+        self.request_id = request_id or self._derived_id
+
+        # Fail fast: validate ffmpeg presence and version before any work starts.
+        self._ffmpeg_version = validate_ffmpeg()
         self._placeholder_count = 0
 
     # ------------------------------------------------------------------
@@ -104,7 +115,7 @@ class PreviewRenderer:
         placeholder_dir = self.output_dir / ".placeholders"
         placeholder_dir.mkdir(exist_ok=True)
 
-        ffmpeg_version = get_ffmpeg_version()
+        ffmpeg_version = self._ffmpeg_version   # already validated at __init__
         logger.info(
             "PreviewRenderer | project=%s | ffmpeg=%s | shots=%d",
             self.manifest.project_id,
@@ -112,9 +123,10 @@ class PreviewRenderer:
             len(self.manifest.shots),
         )
 
-        # Lineage hashes: computed from the canonical JSON representation.
-        manifest_hash = _sha256_text(self.manifest.model_dump_json())
-        plan_hash = _sha256_text(self.plan.model_dump_json())
+        # Lineage hashes: canonical JSON (sorted keys, compact separators, UTF-8).
+        # Pre-computed in __init__ to guarantee the same hash as the derived IDs.
+        manifest_hash = self._manifest_hash
+        plan_hash = self._plan_hash
 
         # Step 1 — resolve or generate one visual input per shot.
         shot_inputs = self._resolve_shot_inputs(placeholder_dir)
@@ -134,7 +146,7 @@ class PreviewRenderer:
         # Step 5 — assemble RenderOutput.
         result = RenderOutput(
             schema_version="1.0.0",
-            output_id=str(uuid.uuid4()),
+            output_id=self._derived_id,   # stable: sha256(manifest_hash:plan_hash)
             request_id=self.request_id,
             render_plan_ref=self.plan.asset_manifest_ref,
             video_uri=f"file://{output_mp4.resolve()}",
@@ -287,24 +299,36 @@ class PreviewRenderer:
         cmd += ["-map", "[vout]"]
 
         # --- Audio ---
+        # Phase-0 constant: aac is the only supported audio codec.
+        # Configurable codec support is deferred to Phase 1.
         if music_path is not None:
             cmd += [
                 "-map", f"{n}:a",
                 "-t", f"{total_dur_s:.6f}",
-                "-c:a", "aac",
+                "-c:a", "aac",          # Phase-0 constant
                 "-flags:a", "+bitexact",
             ]
         else:
             cmd += ["-an"]
 
-        # --- Encoding + determinism ---
+        # --- Phase-0 fixed encoding constants + determinism flags ---
+        # CRF, preset, pix_fmt are deliberately hardcoded for Phase 0 and are
+        # NOT configurable via RenderPlan.  Moving them into a profile config
+        # is deferred to Phase 1.
+        #   libx264  — only supported video codec in Phase 0
+        #   CRF 28   — quality knob (lower = better quality / larger file)
+        #   medium   — speed/size tradeoff preset
+        #   yuv420p  — broadest decoder compatibility
+        # Determinism flags ensure bit-identical output for the same inputs:
+        #   -fflags +bitexact / -flags:v +bitexact — suppress non-reproducible metadata
+        #   -map_metadata -1                        — strip creation_time, encoder strings
+        #   -movflags +faststart                    — consistent MP4 atom ordering
         cmd += [
             "-c:v", "libx264",
-            "-crf", "28",
-            "-preset", "medium",
-            "-pix_fmt", "yuv420p",
+            "-crf", "28",           # Phase-0 constant
+            "-preset", "medium",    # Phase-0 constant
+            "-pix_fmt", "yuv420p",  # Phase-0 constant
             "-r", str(fps),
-            # Determinism: prevent ffmpeg from embedding non-reproducible metadata.
             "-fflags", "+bitexact",
             "-flags:v", "+bitexact",
             "-map_metadata", "-1",
@@ -340,6 +364,18 @@ def _resolve_music(manifest: AssetManifest) -> Optional[Path]:
         manifest.music_uri,
     )
     return None
+
+
+def _canonical_json_hash(obj: dict) -> str:
+    """SHA-256 of canonical JSON — sorted keys, compact separators, UTF-8.
+
+    Used for lineage hashes and deterministic ID derivation so the same
+    Pydantic model always produces the same hash regardless of dict insertion
+    order or serialisation library internals (e.g. model_dump_json() key order
+    is not guaranteed to be stable across Pydantic versions).
+    """
+    canonical = json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _sha256_file(path: Path) -> str:

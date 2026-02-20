@@ -2,6 +2,15 @@
 
 Production-ready integration tests that validate the entire video render pipeline end-to-end using **real media files** and **real FFmpeg rendering** (no mocks).
 
+## Quick Start (One Command)
+
+```bash
+bash scripts/run_integration_render_real.sh
+```
+
+This generates test assets, sets `VIDEO_TEST_ASSETS`, and runs the tests.
+Run from repo root. Safe to re-run (idempotent).
+
 ## Overview
 
 These tests verify that the render engine correctly processes images, videos, and audio according to the JSON EDL v1 schema. They test:
