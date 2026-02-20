@@ -236,6 +236,8 @@ class PreviewRenderer:
             schema_version="1.0.0",
             output_id=self._derived_id,
             request_id=self.request_id,
+            # self.plan.asset_manifest_ref carries the render-plan file URI
+            # (set by _adapt_plan(); same source used in render() above).
             render_plan_ref=self.plan.asset_manifest_ref,
             asset_manifest_ref=self._asset_manifest_ref,
             video_uri=None,
