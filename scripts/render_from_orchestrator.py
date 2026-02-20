@@ -171,6 +171,15 @@ def main() -> None:
         metavar="PATH",
         help="Output directory for output.mp4, output.srt, render_output.json",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help=(
+            "Validate inputs and write render_output.json with effective_settings only; "
+            "no mp4 or srt is produced."
+        ),
+    )
     args = parser.parse_args()
 
     try:
@@ -192,6 +201,7 @@ def main() -> None:
         result = PreviewRenderer(
             manifest, plan, output_dir=args.out_dir,
             asset_manifest_ref=asset_manifest_ref,
+            dry_run=args.dry_run,
         ).render()
         # render() already writes render_output.json to out_dir.
         print(result.model_dump_json(indent=2))

@@ -32,7 +32,14 @@ from urllib.parse import urlparse
 
 from schemas.asset_manifest import AssetManifest, Shot
 from schemas.render_plan import RenderPlan
-from schemas.render_output import Lineage, OutputHashes, Provenance, RenderOutput
+from schemas.render_output import (
+    EffectiveSettings,
+    Lineage,
+    OutputArtifact,
+    OutputHashes,
+    Provenance,
+    RenderOutput,
+)
 from renderer.captions import write_srt
 from renderer.ffmpeg_runner import FFmpegError, run_ffmpeg, validate_ffmpeg
 from renderer.placeholder import generate_placeholder
@@ -67,6 +74,7 @@ class PreviewRenderer:
         output_dir: Path,
         request_id: Optional[str] = None,
         asset_manifest_ref: str = "",   # file:// URI of the source manifest
+        dry_run: bool = False,
     ) -> None:
         if plan.profile != "preview_local":
             raise ValueError(
@@ -85,6 +93,7 @@ class PreviewRenderer:
         self.plan = plan
         self.output_dir = Path(output_dir)
         self._asset_manifest_ref = asset_manifest_ref
+        self.dry_run = dry_run
 
         # Pre-compute canonical lineage hashes once; reused by render() to
         # avoid double-serialisation and to derive stable IDs.
@@ -97,7 +106,8 @@ class PreviewRenderer:
         self.request_id = request_id or self._derived_id
 
         # Fail fast: validate ffmpeg presence and version before any work starts.
-        self._ffmpeg_version = validate_ffmpeg()
+        # Skip the check in dry-run mode — no subprocess will be executed.
+        self._ffmpeg_version = "dry-run" if dry_run else validate_ffmpeg()
         self._placeholder_count = 0
 
     # ------------------------------------------------------------------
@@ -112,7 +122,14 @@ class PreviewRenderer:
           output.mp4         — encoded video
           output.srt         — SRT captions (empty if no VO lines)
           render_output.json — serialised RenderOutput for the artifact registry
+
+        In dry-run mode, only render_output.json is written; no mp4 or srt
+        is produced.  See _dry_run_output() for details.
         """
+        # --- Early exit for dry-run ---
+        if self.dry_run:
+            return self._dry_run_output()
+
         self.output_dir.mkdir(parents=True, exist_ok=True)
         placeholder_dir = self.output_dir / ".placeholders"
         placeholder_dir.mkdir(exist_ok=True)
@@ -170,6 +187,24 @@ class PreviewRenderer:
                 asset_manifest_hash=manifest_hash,
                 render_plan_hash=plan_hash,
             ),
+            outputs=[
+                OutputArtifact(
+                    type="video",
+                    path=str(output_mp4.resolve()),
+                    sha256=video_hash,
+                ),
+                OutputArtifact(
+                    type="captions",
+                    path=str(output_srt.resolve()),
+                    sha256=captions_hash,
+                ),
+            ],
+            effective_settings=EffectiveSettings(
+                resolution=f"{self.plan.resolution.width}x{self.plan.resolution.height}",
+                fps=str(self.plan.fps),
+                audio_rate="aac" if _resolve_music(self.manifest) else "none",
+                encoder="libx264",   # Phase-0 constant
+            ),
         )
 
         output_json = self.output_dir / "render_output.json"
@@ -179,6 +214,52 @@ class PreviewRenderer:
             output_mp4,
             self._placeholder_count,
         )
+        return result
+
+    def _dry_run_output(self) -> RenderOutput:
+        """
+        Build and write render_output.json without executing the render pipeline.
+
+        Called instead of the full render when self.dry_run is True.
+        Populates effective_settings so callers can verify schema compatibility
+        and inspect intended encoding parameters; outputs[] is left empty because
+        no files are produced.
+        """
+        music_path = _resolve_music(self.manifest)
+        effective = EffectiveSettings(
+            resolution=f"{self.plan.resolution.width}x{self.plan.resolution.height}",
+            fps=str(self.plan.fps),
+            audio_rate="aac" if music_path else "none",
+            encoder="libx264",
+        )
+        result = RenderOutput(
+            schema_version="1.0.0",
+            output_id=self._derived_id,
+            request_id=self.request_id,
+            render_plan_ref=self.plan.asset_manifest_ref,
+            asset_manifest_ref=self._asset_manifest_ref,
+            video_uri=None,
+            captions_uri=None,
+            audio_stems_uri=None,
+            hashes=OutputHashes(video_sha256="", captions_sha256=None),
+            provenance=Provenance(
+                render_profile=self.plan.profile,
+                timing_lock_hash=self.plan.timing_lock_hash,
+                rendered_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                ffmpeg_version="dry-run",
+                placeholder_count=0,
+            ),
+            lineage=Lineage(
+                asset_manifest_hash=self._manifest_hash,
+                render_plan_hash=self._plan_hash,
+            ),
+            outputs=[],
+            effective_settings=effective,
+        )
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        output_json = self.output_dir / "render_output.json"
+        output_json.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+        logger.info("Dry-run complete → render_output.json written (no mp4/srt produced)")
         return result
 
     # ------------------------------------------------------------------

@@ -48,6 +48,21 @@ class Lineage(BaseModel):
     render_plan_hash: str       # SHA-256 of the input RenderPlan JSON
 
 
+class OutputArtifact(BaseModel):
+    """One produced output file with its content hash."""
+    type: str      # "video" | "captions"
+    path: str      # absolute filesystem path
+    sha256: str    # hex SHA-256 of file contents
+
+
+class EffectiveSettings(BaseModel):
+    """Render settings snapshot — enables determinism proofs."""
+    resolution: str   # e.g. "1280x720"
+    fps: str          # e.g. "24"
+    audio_rate: str   # codec name or "none"  (Phase-0: "aac" or "none")
+    encoder: str      # e.g. "libx264"
+
+
 class RenderOutput(BaseModel):
     """
     RenderOutput — result of one renderer invocation.
@@ -58,9 +73,11 @@ class RenderOutput(BaseModel):
     request_id: str
     render_plan_ref: str
     asset_manifest_ref: str = ""         # file:// absolute path to input AssetManifest
-    video_uri: str                       # file:// URI of output .mp4
+    video_uri: Optional[str] = None      # file:// URI of output .mp4; None in dry-run
     captions_uri: Optional[str] = None  # file:// URI of .srt; null if no VO lines
     audio_stems_uri: Optional[str] = None  # null in Phase 0
     hashes: OutputHashes
     provenance: Provenance
     lineage: Lineage
+    outputs: list[OutputArtifact] = []
+    effective_settings: Optional[EffectiveSettings] = None
