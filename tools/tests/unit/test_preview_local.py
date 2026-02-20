@@ -223,9 +223,11 @@ class TestVerifyMode:
             from PIL import Image  # noqa: F401
         except ImportError:
             pytest.skip("Pillow not installed")
+        from tests._fixture_builders import build_minimal_verify_fixture
+        manifest, plan = build_minimal_verify_fixture()
         out = tmp_path_factory.mktemp("verify_out")
         r = PreviewRenderer(
-            _make_manifest(), _make_plan(),
+            manifest, plan,
             output_dir=out,
             asset_manifest_ref="file:///asset_manifest.json",
             dry_run=False,
