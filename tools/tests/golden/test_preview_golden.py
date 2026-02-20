@@ -202,7 +202,7 @@ class TestPreviewGolden:
         from_disk = RenderOutput.model_validate_json(json_path.read_text())
         assert from_disk.lineage.asset_manifest_hash == result.lineage.asset_manifest_hash
         assert from_disk.hashes.video_sha256 == result.hashes.video_sha256
-        assert from_disk.provenance.render_profile == "preview_local"
+        assert from_disk.provenance.render_profile == "preview"
         assert from_disk.schema_version == "0.0.1"
         assert from_disk.schema_id == "RenderOutput"
         assert from_disk.producer.name == "PreviewRenderer"

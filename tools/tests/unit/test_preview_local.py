@@ -81,7 +81,7 @@ class TestDryRun:
         assert all(c in "0123456789abcdef" for c in dry_result.inputs_digest)
 
     def test_inputs_digest_pinned(self, dry_result):
-        assert dry_result.inputs_digest == "e4888c424d621df96627e007e46a727a07de4083d7519e4b0e9c94794bec31a2"
+        assert dry_result.inputs_digest == "86b7f38776520babf632ef58b7b2cb7c4e2ffa703ce9d8b8f57102b68c096ab1"
 
     def test_inputs_digest_determinism(self, tmp_path):
         import json as _json
@@ -246,7 +246,7 @@ class TestVerifyMode:
     def test_inputs_digest_pinned(self, verify_result):
         fp, _ = verify_result
         # Same manifest+plan as TestDryRun → identical inputs_digest
-        assert fp.inputs_digest == "e4888c424d621df96627e007e46a727a07de4083d7519e4b0e9c94794bec31a2"
+        assert fp.inputs_digest == "86b7f38776520babf632ef58b7b2cb7c4e2ffa703ce9d8b8f57102b68c096ab1"
 
     def test_srt_sha256_pinned(self, verify_result):
         fp, _ = verify_result
@@ -286,3 +286,82 @@ class TestVerifyMode:
             return (out / "render_fingerprint.json").read_bytes()
 
         assert _fp_bytes(tmp_path / "a") == _fp_bytes(tmp_path / "b")
+
+
+@pytest.mark.slow
+class TestHighProfile:
+    """Pin tests for profile=high (CRF=18, preset=slow)."""
+
+    @pytest.fixture(autouse=True)
+    def _need_ffmpeg(self, require_ffmpeg): ...
+
+    @pytest.fixture(scope="class")
+    def high_result(self, tmp_path_factory):
+        try:
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            pytest.skip("Pillow not installed")
+        from tests._fixture_builders import build_minimal_verify_fixture
+        manifest, plan = build_minimal_verify_fixture(profile="high")
+        out = tmp_path_factory.mktemp("high_out")
+        return PreviewRenderer(
+            manifest, plan, output_dir=out,
+            asset_manifest_ref="file:///asset_manifest.json",
+            dry_run=False,
+        ).verify(), out
+
+    def test_inputs_digest_pinned(self, high_result):
+        fp, _ = high_result
+        assert fp.inputs_digest == "b0baa3766120f32e80d3ef123123697ccd7ef54db3c19e4084363dcf9a1d9846"
+
+    def test_mp4_sha256_pinned(self, high_result):
+        fp, _ = high_result
+        assert fp.mp4_sha256 == "5e41afd474b4d812d3bcabb226f3effea0f6cdce277eaba48d6d5d2fce0dcaf8"
+
+    def test_srt_sha256_pinned(self, high_result):
+        fp, _ = high_result
+        assert fp.srt_sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+    def test_fingerprint_json_bytes_deterministic(self, tmp_path):
+        """Two verify() calls on high profile → byte-identical fingerprint."""
+        try:
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            pytest.skip("Pillow not installed")
+        from tests._fixture_builders import build_minimal_verify_fixture
+
+        def _fp_bytes(out):
+            manifest, plan = build_minimal_verify_fixture(profile="high")
+            PreviewRenderer(
+                manifest, plan, output_dir=out,
+                asset_manifest_ref="file:///asset_manifest.json",
+                dry_run=False,
+            ).verify()
+            return (out / "render_fingerprint.json").read_bytes()
+
+        assert _fp_bytes(tmp_path / "a") == _fp_bytes(tmp_path / "b")
+
+    def test_mp4_differs_from_preview(self, high_result, tmp_path):
+        """High profile mp4 must differ from preview profile mp4."""
+        fp_high, _ = high_result
+        from tests._fixture_builders import build_minimal_verify_fixture
+        manifest, plan = build_minimal_verify_fixture(profile="preview_local")
+        fp_preview = PreviewRenderer(
+            manifest, plan, output_dir=tmp_path / "prev",
+            asset_manifest_ref="file:///asset_manifest.json",
+        ).verify()
+        assert fp_high.mp4_sha256 != fp_preview.mp4_sha256
+
+    def test_effective_settings_fields(self, tmp_path):
+        """Dry-run for high profile must expose crf/preset/profile in effective_settings."""
+        from tests._fixture_builders import build_minimal_verify_fixture
+        manifest, plan = build_minimal_verify_fixture(profile="high")
+        result = PreviewRenderer(
+            manifest, plan, output_dir=tmp_path / "out",
+            asset_manifest_ref="file:///asset_manifest.json",
+            dry_run=True,
+        ).render()
+        es = result.effective_settings
+        assert es.crf == "18"
+        assert es.preset == "slow"
+        assert es.profile == "high"

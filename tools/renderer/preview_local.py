@@ -49,6 +49,18 @@ from renderer.placeholder import generate_placeholder
 
 logger = logging.getLogger(__name__)
 
+_PROFILE_SETTINGS: dict[str, dict[str, str]] = {
+    "preview": {"crf": "28", "preset": "medium"},
+    "high":    {"crf": "18", "preset": "slow"},
+}
+_PROFILE_ALIASES: dict[str, str] = {
+    "preview_local": "preview",   # Phase-0 backward-compat alias
+}
+
+
+def _normalize_profile(raw: str) -> str:
+    return _PROFILE_ALIASES.get(raw, raw)
+
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -79,11 +91,14 @@ class PreviewRenderer:
         asset_manifest_ref: str = "",   # file:// URI of the source manifest
         dry_run: bool = False,
     ) -> None:
-        if plan.profile != "preview_local":
+        _norm = _normalize_profile(plan.profile)
+        if _norm not in _PROFILE_SETTINGS:
             raise ValueError(
-                f"PreviewRenderer only supports profile=preview_local, "
-                f"got: {plan.profile!r}"
+                f"PreviewRenderer: unsupported profile {plan.profile!r}. "
+                f"Supported: {sorted(_PROFILE_SETTINGS)} "
+                f"(aliases: {sorted(_PROFILE_ALIASES)})"
             )
+        self._profile = _norm   # canonical name; used throughout
         if manifest.timing_lock_hash != plan.timing_lock_hash:
             raise ValueError(
                 f"timing_lock_hash mismatch between AssetManifest "
@@ -183,11 +198,15 @@ class PreviewRenderer:
         captions_hash = _sha256_text(output_srt.read_text(encoding="utf-8"))
 
         # Step 5 — assemble RenderOutput.
+        _ps = _PROFILE_SETTINGS[self._profile]
         effective = EffectiveSettings(
             resolution=f"{self.plan.resolution.width}x{self.plan.resolution.height}",
             fps=str(self.plan.fps),
             audio_rate="aac" if _resolve_music(self.manifest) else "none",
-            encoder="libx264",   # Phase-0 constant
+            encoder="libx264",
+            crf=_ps["crf"],
+            preset=_ps["preset"],
+            profile=self._profile,
         )
         result = RenderOutput(
             schema_version="0.0.1",
@@ -204,7 +223,7 @@ class PreviewRenderer:
                 captions_sha256=captions_hash,
             ),
             provenance=Provenance(
-                render_profile=self.plan.profile,
+                render_profile=self._profile,
                 timing_lock_hash=self.plan.timing_lock_hash,
                 rendered_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 ffmpeg_version=ffmpeg_version,
@@ -300,11 +319,15 @@ class PreviewRenderer:
         no files are produced.
         """
         music_path = _resolve_music(self.manifest)
+        _ps = _PROFILE_SETTINGS[self._profile]
         effective = EffectiveSettings(
             resolution=f"{self.plan.resolution.width}x{self.plan.resolution.height}",
             fps=str(self.plan.fps),
             audio_rate="aac" if music_path else "none",
             encoder="libx264",
+            crf=_ps["crf"],
+            preset=_ps["preset"],
+            profile=self._profile,
         )
         result = RenderOutput(
             schema_version="0.0.1",
@@ -320,7 +343,7 @@ class PreviewRenderer:
             audio_stems_uri=None,
             hashes=OutputHashes(video_sha256="", captions_sha256=None),
             provenance=Provenance(
-                render_profile=self.plan.profile,
+                render_profile=self._profile,
                 timing_lock_hash=self.plan.timing_lock_hash,
                 rendered_at="dry-run",
                 ffmpeg_version="dry-run",
@@ -489,22 +512,18 @@ class PreviewRenderer:
         else:
             cmd += ["-an"]
 
-        # --- Phase-0 fixed encoding constants + determinism flags ---
-        # CRF, preset, pix_fmt are deliberately hardcoded for Phase 0 and are
-        # NOT configurable via RenderPlan.  Moving them into a profile config
-        # is deferred to Phase 1.
-        #   libx264  — only supported video codec in Phase 0
-        #   CRF 28   — quality knob (lower = better quality / larger file)
-        #   medium   — speed/size tradeoff preset
-        #   yuv420p  — broadest decoder compatibility
+        # --- Encoding constants + determinism flags ---
+        # CRF and preset come from the profile registry (_PROFILE_SETTINGS).
+        # pix_fmt is fixed for broadest decoder compatibility.
         # Determinism flags ensure bit-identical output for the same inputs:
         #   -fflags +bitexact / -flags:v +bitexact — suppress non-reproducible metadata
         #   -map_metadata -1                        — strip creation_time, encoder strings
         #   -movflags +faststart                    — consistent MP4 atom ordering
+        _ps = _PROFILE_SETTINGS[self._profile]
         cmd += [
             "-c:v", "libx264",
-            "-crf", "28",           # Phase-0 constant
-            "-preset", "medium",    # Phase-0 constant
+            "-crf", _ps["crf"],
+            "-preset", _ps["preset"],
             "-pix_fmt", "yuv420p",  # Phase-0 constant
             "-r", str(fps),
             "-fflags", "+bitexact",

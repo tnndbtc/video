@@ -98,3 +98,51 @@ class TestVideoVerifyDeterminismFailure:
         assert exit_code == 1
         assert captured.out.strip() == "ERROR: video verification failed"
         assert "fingerprint JSON bytes differ" in captured.err
+
+
+@pytest.mark.slow
+class TestVideoVerifyProfile:
+    """Test --profile flag for both preview and high profiles."""
+
+    @pytest.fixture(autouse=True)
+    def _need_ffmpeg(self, require_ffmpeg): ...
+
+    def test_profile_preview_explicit_exits_zero(self):
+        try:
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            pytest.skip("Pillow not installed")
+        result = subprocess.run(
+            [sys.executable, str(VIDEO_SCRIPT), "verify", "--profile", "preview"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "OK: video verified"
+
+    def test_profile_high_exits_zero(self):
+        try:
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            pytest.skip("Pillow not installed")
+        result = subprocess.run(
+            [sys.executable, str(VIDEO_SCRIPT), "verify", "--profile", "high"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "OK: video verified"
+
+    def test_preview_and_high_fingerprints_differ(self, tmp_path):
+        """Preview and high profiles must produce different fingerprint bytes."""
+        try:
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            pytest.skip("Pillow not installed")
+        import tempfile
+        spec = importlib.util.spec_from_file_location("video_cli", VIDEO_SCRIPT)
+        video_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(video_mod)
+        with (tempfile.TemporaryDirectory() as dp,
+              tempfile.TemporaryDirectory() as dh):
+            bp = video_mod._fingerprint_bytes(Path(dp), profile="preview")
+            bh = video_mod._fingerprint_bytes(Path(dh), profile="high")
+        assert bp != bh

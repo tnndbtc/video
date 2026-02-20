@@ -61,6 +61,9 @@ class EffectiveSettings(BaseModel):
     fps: str          # e.g. "24"
     audio_rate: str   # codec name or "none"  (Phase-0: "aac" or "none")
     encoder: str      # e.g. "libx264"
+    crf: Optional[str] = None      # e.g. "28" for preview, "18" for high
+    preset: Optional[str] = None   # e.g. "medium" for preview, "slow" for high
+    profile: Optional[str] = None  # canonical name: "preview" or "high"
 
 
 class Producer(BaseModel):
