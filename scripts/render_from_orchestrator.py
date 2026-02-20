@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Cross-repo smoke render CLI.
+Sole renderer CLI — accepts AssetManifest.json and RenderPlan.json, auto-detects
+format (native Pydantic or orchestrator-adapter), then invokes PreviewRenderer.
 
-Accepts AssetManifest.json and RenderPlan.json produced by the orchestrator,
-translates them into the renderer's Pydantic schemas, then invokes PreviewRenderer.
+Stdout: full RenderOutput JSON (parseable by callers).
+Stderr: error message on failure (exit code 1).
 
 Usage::
 
-    python scripts/smoke_render.py \\
-        --asset-manifest /tmp/orch-artifacts/.../AssetManifest.json \\
-        --render-plan    /tmp/orch-artifacts/.../RenderPlan.json \\
+    python scripts/render_from_orchestrator.py \\
+        --asset-manifest /path/to/AssetManifest.json \\
+        --render-plan    /path/to/RenderPlan.json \\
         --out-dir        /tmp/smoke-out
 """
 from __future__ import annotations
@@ -147,21 +148,21 @@ def _adapt_plan(raw: dict, render_plan_path: Path) -> RenderPlan:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Cross-repo smoke render: translate orchestrator JSON and invoke PreviewRenderer."
+        description="Sole renderer CLI: invoke PreviewRenderer and print RenderOutput JSON."
     )
     parser.add_argument(
         "--asset-manifest",
         type=Path,
         required=True,
         metavar="PATH",
-        help="Path to orchestrator-format AssetManifest.json",
+        help="Path to AssetManifest.json (native Pydantic or orchestrator format)",
     )
     parser.add_argument(
         "--render-plan",
         type=Path,
         required=True,
         metavar="PATH",
-        help="Path to orchestrator-format RenderPlan.json",
+        help="Path to RenderPlan.json (native Pydantic or orchestrator format)",
     )
     parser.add_argument(
         "--out-dir",
@@ -172,18 +173,32 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    raw_manifest = json.loads(args.asset_manifest.read_text(encoding="utf-8"))
-    raw_plan = json.loads(args.render_plan.read_text(encoding="utf-8"))
+    try:
+        raw_manifest = json.loads(args.asset_manifest.read_text(encoding="utf-8"))
+        raw_plan = json.loads(args.render_plan.read_text(encoding="utf-8"))
 
-    manifest = _adapt_manifest(raw_manifest, raw_plan["timing_lock_hash"])
-    plan = _adapt_plan(raw_plan, args.render_plan)
+        # Format auto-detect: native Pydantic format has a top-level "shots" key;
+        # orchestrator format uses "backgrounds" / "character_packs" / "vo_items".
+        if "shots" in raw_manifest:
+            manifest = AssetManifest.model_validate(raw_manifest)
+            plan = RenderPlan.model_validate(raw_plan)
+        else:
+            manifest = _adapt_manifest(raw_manifest, raw_plan["timing_lock_hash"])
+            plan = _adapt_plan(raw_plan, args.render_plan)
 
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+        args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    result = PreviewRenderer(manifest, plan, output_dir=args.out_dir).render()
-    # render() already writes render_output.json to out_dir.
-    print(result.model_dump_json(indent=2))
-    print(f"\nArtifacts in {args.out_dir}")
+        asset_manifest_ref = f"file://{args.asset_manifest.resolve()}"
+        result = PreviewRenderer(
+            manifest, plan, output_dir=args.out_dir,
+            asset_manifest_ref=asset_manifest_ref,
+        ).render()
+        # render() already writes render_output.json to out_dir.
+        print(result.model_dump_json(indent=2))
+
+    except Exception as exc:  # noqa: BLE001
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ class Provenance(BaseModel):
     rendered_at: str            # ISO 8601
     ffmpeg_version: str         # e.g. "6.1.1" — must match pinned version for golden tests
     placeholder_count: int = 0  # number of shots that used generated placeholders
+    renderer: str = "video"     # identifies the renderer implementation
 
 
 class Lineage(BaseModel):
@@ -56,6 +57,7 @@ class RenderOutput(BaseModel):
     output_id: str
     request_id: str
     render_plan_ref: str
+    asset_manifest_ref: str = ""         # file:// absolute path to input AssetManifest
     video_uri: str                       # file:// URI of output .mp4
     captions_uri: Optional[str] = None  # file:// URI of .srt; null if no VO lines
     audio_stems_uri: Optional[str] = None  # null in Phase 0

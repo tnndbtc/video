@@ -66,6 +66,7 @@ class PreviewRenderer:
         plan: RenderPlan,
         output_dir: Path,
         request_id: Optional[str] = None,
+        asset_manifest_ref: str = "",   # file:// URI of the source manifest
     ) -> None:
         if plan.profile != "preview_local":
             raise ValueError(
@@ -83,6 +84,7 @@ class PreviewRenderer:
         self.manifest = manifest
         self.plan = plan
         self.output_dir = Path(output_dir)
+        self._asset_manifest_ref = asset_manifest_ref
 
         # Pre-compute canonical lineage hashes once; reused by render() to
         # avoid double-serialisation and to derive stable IDs.
@@ -149,6 +151,7 @@ class PreviewRenderer:
             output_id=self._derived_id,   # stable: sha256(manifest_hash:plan_hash)
             request_id=self.request_id,
             render_plan_ref=self.plan.asset_manifest_ref,
+            asset_manifest_ref=self._asset_manifest_ref,
             video_uri=f"file://{output_mp4.resolve()}",
             captions_uri=f"file://{output_srt.resolve()}",
             audio_stems_uri=None,

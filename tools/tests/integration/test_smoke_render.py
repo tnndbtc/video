@@ -14,7 +14,7 @@ import pytest
 ARTIFACTS = Path("/tmp/orch-artifacts/phase0-demo/run-4aab1f4530ea")
 MANIFEST_PATH = ARTIFACTS / "AssetManifest.json"
 PLAN_PATH = ARTIFACTS / "RenderPlan.json"
-SMOKE_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "smoke_render.py"
+SMOKE_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "render_from_orchestrator.py"
 _EXPECTED_HASH = "12fc3b425b23b76456ebda4a86848ab0da27d0f833a63fdbaeaf1b6f44904b7e"
 
 
