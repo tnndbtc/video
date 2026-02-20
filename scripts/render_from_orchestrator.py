@@ -180,7 +180,20 @@ def main() -> None:
             "no mp4 or srt is produced."
         ),
     )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        default=False,
+        help=(
+            "Run dry-run validation then full render; emit render_fingerprint.json. "
+            "Stdout: fingerprint JSON (no timestamps). Cannot be combined with --dry-run."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.verify and args.dry_run:
+        print("ERROR: --verify and --dry-run are mutually exclusive", file=sys.stderr)
+        sys.exit(1)
 
     try:
         raw_manifest = json.loads(args.asset_manifest.read_text(encoding="utf-8"))
@@ -198,13 +211,20 @@ def main() -> None:
         args.out_dir.mkdir(parents=True, exist_ok=True)
 
         asset_manifest_ref = f"file://{args.asset_manifest.resolve()}"
-        result = PreviewRenderer(
-            manifest, plan, output_dir=args.out_dir,
-            asset_manifest_ref=asset_manifest_ref,
-            dry_run=args.dry_run,
-        ).render()
-        # render() already writes render_output.json to out_dir.
-        print(result.model_dump_json(indent=2))
+        if args.verify:
+            fp = PreviewRenderer(
+                manifest, plan, output_dir=args.out_dir,
+                asset_manifest_ref=asset_manifest_ref,
+                dry_run=False,
+            ).verify()
+            print(fp.model_dump_json(indent=2))
+        else:
+            result = PreviewRenderer(
+                manifest, plan, output_dir=args.out_dir,
+                asset_manifest_ref=asset_manifest_ref,
+                dry_run=args.dry_run,
+            ).render()
+            print(result.model_dump_json(indent=2))
 
     except Exception as exc:  # noqa: BLE001
         print(f"ERROR: {exc}", file=sys.stderr)

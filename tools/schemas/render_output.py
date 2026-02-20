@@ -69,6 +69,14 @@ class Producer(BaseModel):
     version: str = "0.0.1"
 
 
+class RenderFingerprint(BaseModel):
+    """Deterministic render fingerprint — no wall-clock timestamps."""
+    inputs_digest: str            # SHA-256 of canonical plan+manifest+effective_settings
+    mp4_sha256: str               # SHA-256 of output.mp4 bytes
+    srt_sha256: str               # SHA-256 of output.srt text (UTF-8); "" if no VO
+    frame_hashes: list[str] = []  # per-frame lines from ffmpeg -f framemd5 (# lines stripped)
+
+
 class RenderOutput(BaseModel):
     """
     RenderOutput — result of one renderer invocation.

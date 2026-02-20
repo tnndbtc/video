@@ -209,3 +209,78 @@ class TestFromFiles:
             dry_run=True,
         )
         assert isinstance(r, PreviewRenderer)
+
+
+@pytest.mark.slow
+class TestVerifyMode:
+
+    @pytest.fixture(autouse=True)
+    def _need_ffmpeg(self, require_ffmpeg): ...
+
+    @pytest.fixture(scope="class")
+    def verify_result(self, tmp_path_factory):
+        try:
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            pytest.skip("Pillow not installed")
+        out = tmp_path_factory.mktemp("verify_out")
+        r = PreviewRenderer(
+            _make_manifest(), _make_plan(),
+            output_dir=out,
+            asset_manifest_ref="file:///asset_manifest.json",
+            dry_run=False,
+        )
+        return r.verify(), out
+
+    def test_fingerprint_file_written(self, verify_result):
+        _, out = verify_result
+        assert (out / "render_fingerprint.json").exists()
+
+    def test_mp4_and_srt_written(self, verify_result):
+        _, out = verify_result
+        assert (out / "output.mp4").exists()
+        assert (out / "output.srt").exists()
+
+    def test_inputs_digest_pinned(self, verify_result):
+        fp, _ = verify_result
+        # Same manifest+plan as TestDryRun → identical inputs_digest
+        assert fp.inputs_digest == "e4888c424d621df96627e007e46a727a07de4083d7519e4b0e9c94794bec31a2"
+
+    def test_srt_sha256_pinned(self, verify_result):
+        fp, _ = verify_result
+        # No VO lines → empty SRT → SHA-256("")
+        assert fp.srt_sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+    def test_mp4_sha256_pinned(self, verify_result):
+        fp, _ = verify_result
+        assert fp.mp4_sha256 == "b4a44e354dc6e8808a94a59b7bd402e0496e3d1489223a20a92132a7c8ecd6a9"
+
+    def test_frame_count(self, verify_result):
+        fp, _ = verify_result
+        # 1 shot × 2000 ms × 24 fps = 48 frames
+        assert len(fp.frame_hashes) == 48
+
+    def test_no_timestamp_in_fingerprint_json(self, verify_result):
+        _, out = verify_result
+        import json as _json
+        data = _json.loads((out / "render_fingerprint.json").read_bytes())
+        for bad in ("rendered_at", "timestamp", "created_at"):
+            assert bad not in data
+
+    def test_fingerprint_json_bytes_deterministic(self, tmp_path):
+        """Two verify() calls on identical inputs → byte-identical fingerprint."""
+        try:
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            pytest.skip("Pillow not installed")
+
+        def _fp_bytes(out):
+            PreviewRenderer(
+                _make_manifest(), _make_plan(),
+                output_dir=out,
+                asset_manifest_ref="file:///asset_manifest.json",
+                dry_run=False,
+            ).verify()
+            return (out / "render_fingerprint.json").read_bytes()
+
+        assert _fp_bytes(tmp_path / "a") == _fp_bytes(tmp_path / "b")

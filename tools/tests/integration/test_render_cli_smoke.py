@@ -143,3 +143,64 @@ class TestRenderCliSmoke:
     def test_renderer_field(self, cli_out):
         data = json.loads((cli_out["out_dir"] / "render_output.json").read_text())
         assert data["provenance"]["renderer"] == "video"
+
+
+@pytest.mark.slow
+class TestVerifyCli:
+
+    @pytest.fixture(autouse=True)
+    def _need_ffmpeg(self, require_ffmpeg): ...
+
+    @pytest.fixture(scope="class")
+    def verify_out(self, tmp_path_factory, sample_manifest, sample_plan):
+        run_dir = tmp_path_factory.mktemp("verify_cli_run")
+        manifest_path = run_dir / "AssetManifest.json"
+        plan_path = run_dir / "RenderPlan.json"
+        manifest_path.write_text(sample_manifest.model_dump_json(), encoding="utf-8")
+        plan_path.write_text(sample_plan.model_dump_json(), encoding="utf-8")
+        out_dir = tmp_path_factory.mktemp("verify_cli_out")
+        result = subprocess.run(
+            [sys.executable, str(SMOKE_SCRIPT),
+             "--asset-manifest", str(manifest_path),
+             "--render-plan",    str(plan_path),
+             "--out-dir",        str(out_dir),
+             "--verify"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, (
+            f"--verify exited {result.returncode}:\n{result.stdout}\n{result.stderr}"
+        )
+        return {"out_dir": out_dir, "stdout": result.stdout}
+
+    def test_fingerprint_json_exists(self, verify_out):
+        assert (verify_out["out_dir"] / "render_fingerprint.json").exists()
+
+    def test_mp4_and_srt_exist(self, verify_out):
+        assert (verify_out["out_dir"] / "output.mp4").exists()
+        assert (verify_out["out_dir"] / "output.srt").exists()
+
+    def test_stdout_is_fingerprint_json(self, verify_out):
+        import json as _json
+        data = _json.loads(verify_out["stdout"])
+        assert "inputs_digest" in data
+        assert "mp4_sha256" in data
+        assert "srt_sha256" in data
+        assert "frame_hashes" in data
+
+    def test_no_timestamps_in_stdout(self, verify_out):
+        import json as _json
+        data = _json.loads(verify_out["stdout"])
+        for bad in ("rendered_at", "timestamp", "created_at"):
+            assert bad not in data
+
+    def test_verify_dry_run_mutually_exclusive(self, tmp_path):
+        result = subprocess.run(
+            [sys.executable, str(SMOKE_SCRIPT),
+             "--asset-manifest", str(tmp_path / "m.json"),
+             "--render-plan",    str(tmp_path / "p.json"),
+             "--out-dir",        str(tmp_path / "out"),
+             "--verify", "--dry-run"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 1
+        assert "mutually exclusive" in result.stderr

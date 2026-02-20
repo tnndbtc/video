@@ -26,6 +26,7 @@ import datetime
 import hashlib
 import json
 import logging
+import subprocess
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -39,6 +40,7 @@ from schemas.render_output import (
     OutputHashes,
     Producer,
     Provenance,
+    RenderFingerprint,
     RenderOutput,
 )
 from renderer.captions import write_srt
@@ -237,6 +239,56 @@ class PreviewRenderer:
             self._placeholder_count,
         )
         return result
+
+    def verify(self) -> RenderFingerprint:
+        """
+        Validate inputs, run full render, extract frame hashes, write render_fingerprint.json.
+
+        Steps:
+          1. Dry-run  — validates inputs; computes stable inputs_digest.
+          2. Full render — produces output.mp4 + output.srt (skipped if mp4 already present).
+          3. Frame extraction — ffmpeg -f framemd5 on output.mp4.
+          4. Write render_fingerprint.json; return RenderFingerprint.
+
+        Raises ValueError if self.dry_run is True.
+        """
+        if self.dry_run:
+            raise ValueError("verify() requires dry_run=False")
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Step 1: dry-run for input validation + stable inputs_digest
+        dry_result = PreviewRenderer(
+            self.manifest, self.plan,
+            output_dir=self.output_dir,
+            asset_manifest_ref=self._asset_manifest_ref,
+            dry_run=True,
+        ).render()
+
+        # Step 2: full render if output.mp4 not already present
+        mp4_path = self.output_dir / "output.mp4"
+        if mp4_path.exists():
+            ro_path = self.output_dir / "render_output.json"
+            full_result = RenderOutput.model_validate_json(
+                ro_path.read_text(encoding="utf-8")
+            )
+        else:
+            full_result = self.render()
+
+        # Step 3: per-frame MD5s (deterministic for bit-identical mp4)
+        frame_hashes = _extract_frame_hashes(mp4_path)
+
+        # Step 4: build + write fingerprint (no timestamps)
+        fp = RenderFingerprint(
+            inputs_digest=dry_result.inputs_digest,
+            mp4_sha256=full_result.hashes.video_sha256,
+            srt_sha256=full_result.hashes.captions_sha256 or "",
+            frame_hashes=frame_hashes,
+        )
+        fp_path = self.output_dir / "render_fingerprint.json"
+        fp_path.write_text(fp.model_dump_json(indent=2), encoding="utf-8")
+        logger.info("Verify complete → render_fingerprint.json written")
+        return fp
 
     def _dry_run_output(self) -> RenderOutput:
         """
@@ -514,3 +566,12 @@ def _sha256_file(path: Path) -> str:
 
 def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _extract_frame_hashes(mp4_path: Path) -> list[str]:
+    """Extract per-frame MD5 lines via ffmpeg -f framemd5; strips comment lines."""
+    result = subprocess.run(
+        ["ffmpeg", "-i", str(mp4_path), "-f", "framemd5", "-"],
+        capture_output=True, text=True, check=True,
+    )
+    return [ln for ln in result.stdout.splitlines() if not ln.startswith("#")]

@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from schemas.asset_manifest import AssetManifest, Shot, VisualAsset, VOLine, SFXItem
 from schemas.render_plan import FallbackConfig, RenderPlan, Resolution
-from schemas.render_output import Lineage, OutputHashes, Producer, Provenance, RenderOutput
+from schemas.render_output import Lineage, OutputHashes, Producer, Provenance, RenderFingerprint, RenderOutput
 
 
 # ===========================================================================
@@ -356,3 +356,40 @@ class TestCanonicalJsonHash:
         assert parsed_keys == sorted(parsed_keys), (
             "Top-level keys are not sorted in canonical JSON output."
         )
+
+
+# ===========================================================================
+# RenderFingerprint — Wave 4
+# ===========================================================================
+
+class TestRenderFingerprint:
+
+    def _make_fp(self) -> RenderFingerprint:
+        return RenderFingerprint(
+            inputs_digest="a" * 64,
+            mp4_sha256="b" * 64,
+            srt_sha256="c" * 64,
+        )
+
+    def test_valid(self):
+        fp = self._make_fp()
+        assert fp.inputs_digest == "a" * 64
+        assert fp.frame_hashes == []
+
+    def test_roundtrip_json(self):
+        fp = self._make_fp()
+        fp2 = RenderFingerprint.model_validate_json(fp.model_dump_json())
+        assert fp2 == fp
+
+    def test_no_timestamp_fields(self):
+        fp = self._make_fp()
+        d = fp.model_dump()
+        for bad_key in ("rendered_at", "timestamp", "created_at"):
+            assert bad_key not in d
+
+    def test_frame_hashes_list(self):
+        fp = RenderFingerprint(
+            inputs_digest="a" * 64, mp4_sha256="b" * 64, srt_sha256="c" * 64,
+            frame_hashes=["hash1", "hash2"],
+        )
+        assert fp.frame_hashes == ["hash1", "hash2"]
