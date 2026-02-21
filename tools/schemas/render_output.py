@@ -101,3 +101,9 @@ class RenderOutput(BaseModel):
     effective_settings: Optional[EffectiveSettings] = None
     inputs_digest: str = ""  # SHA-256 of canonical plan+manifest+effective_settings
     producer: Producer = Field(default_factory=Producer)
+
+
+class RenderAudit(BaseModel):
+    """Result of one audit-render invocation."""
+    status: str                # "pass" | "fail"
+    diff_fields: list[str] = []  # field paths that differed between the two runs
