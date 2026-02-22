@@ -120,3 +120,6 @@ media/
 # Local caches (generated test assets, etc.)
 # =============================================================================
 .cache/
+
+# Un-ignore everything vendored from orchestrator (not generated output)
+!third_party/contracts/**

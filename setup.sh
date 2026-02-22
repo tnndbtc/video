@@ -703,7 +703,7 @@ show_menu() {
     echo -e "     ${YELLOW}(Follow container logs)${NC}"
     echo ""
     echo -e "  ${BOLD}7)${NC} Run tests"
-    echo -e "     ${GREEN}(Backend + Worker test suites)${NC}"
+    echo -e "     ${GREEN}(Non-container local + container suites)${NC}"
     echo ""
     echo -e "  ${BOLD}8)${NC} Install requirements"
     echo -e "     ${CYAN}(Auto-install Docker & Docker Compose on a new machine)${NC}"
@@ -771,6 +771,15 @@ view_logs() {
 run_tests() {
     print_header "Run Tests"
 
+    # Python interpreter — respects active virtualenv
+    local python_cmd
+    if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+        python_cmd="$VIRTUAL_ENV/bin/python"
+    else
+        python_cmd="python3"
+    fi
+
+    # Docker Compose command
     local compose_cmd
     if docker compose version >/dev/null 2>&1; then
         compose_cmd="docker compose"
@@ -778,132 +787,294 @@ run_tests() {
         compose_cmd="docker-compose"
     fi
 
-    # Check if containers are running
-    if ! $compose_cmd ps --format json 2>/dev/null | grep -q "running"; then
-        print_error "Containers are not running. Please start them first (option 1)."
-        return 1
-    fi
+    echo ""
+    echo -e "  ${GREEN}${BOLD}── NON-CONTAINER  (runs directly on this host) ─────────────────${NC}"
+    echo ""
+    echo -e "  ${BOLD}1)${NC} Renderer unit tests       ${YELLOW}(no ffmpeg needed)${NC}"
+    echo -e "     tools/tests/unit/"
+    echo ""
+    echo -e "  ${BOLD}2)${NC} Renderer all tests        ${YELLOW}(ffmpeg required for slow/golden/integration)${NC}"
+    echo -e "     tools/ — unit + golden + integration"
+    echo ""
+    echo -e "  ${BOLD}3)${NC} EDL schema contract       ${YELLOW}(standalone, no backend app deps)${NC}"
+    echo -e "     backend/tests/contract/test_schema_validation.py"
+    echo ""
+    echo -e "  ${BOLD}4)${NC} Contracts verifier        ${YELLOW}(standalone)${NC}"
+    echo -e "     third_party/contracts/tools/verify_contracts.py"
+    echo ""
+    echo -e "  ${BOLD}5)${NC} ${GREEN}Run ALL non-container tests${NC}  (all of 1–4; slow tests auto-skip if no ffmpeg)"
+    echo ""
+    echo -e "  ${RED}${BOLD}── CONTAINER-REQUIRED  (start containers first: main menu → 1) ──${NC}"
+    echo ""
+    echo -e "  ${BOLD}6)${NC}  All container tests            backend + worker"
+    echo -e "  ${BOLD}7)${NC}  Backend — all tests"
+    echo -e "  ${BOLD}8)${NC}  Backend — unit tests only"
+    echo -e "  ${BOLD}9)${NC}  Backend — integration tests only"
+    echo -e "  ${BOLD}10)${NC} Backend — e2e tests only"
+    echo -e "  ${BOLD}11)${NC} Backend — contract tests        determinism + roundtrip"
+    echo -e "  ${BOLD}12)${NC} Worker — all tests"
+    echo -e "  ${BOLD}13)${NC} Worker — unit tests only"
+    echo -e "  ${BOLD}14)${NC} Worker — golden tests only"
+    echo -e "  ${BOLD}15)${NC} AI contract tests              EditPlanV1 + AI endpoints + optional E2E"
+    echo -e "  ${BOLD}16)${NC} Worker render_real integration  host-side, generates assets"
+    echo ""
+    echo -e "  ${BOLD}0)${NC}  Back to main menu"
+    echo ""
+    read -p "Enter choice [0-16]: " test_choice
 
-    echo "Select tests to run:"
-    echo ""
-    echo "  1) Run all tests (backend + worker)"
-    echo "  2) Backend tests only"
-    echo "  3) Worker tests only"
-    echo "  4) Worker golden tests only"
-    echo "  5) Backend unit tests only"
-    echo "  6) AI contract tests (EditPlanV1 schema + AI endpoints + optional E2E round-trip)"
-    echo "  7) Worker render_real integration tests (host, generates assets)"
-    echo "  0) Back to main menu"
-    echo ""
-    read -p "Enter choice [0-7]: " test_choice
+    local _rc
 
     case $test_choice in
+
+        # ══════════════════════════════════════════════════════════════════════
+        # NON-CONTAINER
+        # ══════════════════════════════════════════════════════════════════════
+
         1)
-            print_header "Running All Tests"
-            echo ""
-
-            # Ensure pytest is available in both containers
-            print_info "Installing pytest in containers..."
-            $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
-            $compose_cmd exec -T worker pip install pytest -q 2>/dev/null || true
-
-            # Run backend tests
-            print_info "Running backend tests..."
-            echo ""
-            if $compose_cmd exec -T backend python -m pytest tests/ -v --tb=short 2>&1; then
-                print_success "Backend tests passed!"
+            print_header "Renderer Unit Tests (no ffmpeg)"
+            if $python_cmd -m pytest tools/tests/unit/ -v --tb=short; then
+                print_success "Renderer unit tests PASSED"
             else
-                print_warning "Some backend tests failed"
-            fi
-            echo ""
-
-            # Run worker tests
-            print_info "Running worker tests..."
-            echo ""
-            if $compose_cmd exec -T -e PYTHONPATH=/app worker python -m pytest tests/ -v --tb=short 2>&1; then
-                print_success "Worker tests passed!"
-            else
-                print_warning "Some worker tests failed"
+                print_warning "Renderer unit tests FAILED"
             fi
             ;;
+
         2)
-            print_header "Running Backend Tests"
-            echo ""
-            # Ensure pytest is available
-            $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
-            $compose_cmd exec -T backend python -m pytest tests/ -v --tb=short 2>&1
+            print_header "Renderer All Tests (ffmpeg required for slow tests)"
+            if $python_cmd -m pytest -v --tb=short; then
+                print_success "Renderer all tests PASSED"
+            else
+                print_warning "Renderer all tests FAILED"
+            fi
             ;;
+
         3)
-            print_header "Running Worker Tests"
-            echo ""
-            # Ensure pytest is available
-            $compose_cmd exec -T worker pip install pytest -q 2>/dev/null || true
-            $compose_cmd exec -T -e PYTHONPATH=/app worker python -m pytest tests/ -v --tb=short 2>&1
+            print_header "EDL Schema Contract Tests (standalone)"
+            if (cd "$SCRIPT_DIR/backend" && \
+                $python_cmd -m pytest tests/contract/test_schema_validation.py \
+                    --noconftest -v --tb=short); then
+                print_success "EDL schema contract tests PASSED"
+            else
+                print_warning "EDL schema contract tests FAILED"
+            fi
             ;;
+
         4)
-            print_header "Running Worker Golden Tests"
-            echo ""
-            print_info "These tests verify deterministic video rendering..."
-            echo ""
-            # Ensure pytest is available
-            $compose_cmd exec -T worker pip install pytest -q 2>/dev/null || true
-            $compose_cmd exec -T -e PYTHONPATH=/app worker python -m pytest tests/golden/ -v --tb=short 2>&1
+            print_header "Contracts Verifier"
+            if $python_cmd third_party/contracts/tools/verify_contracts.py; then
+                print_success "Contracts verifier PASSED"
+            else
+                print_warning "Contracts verifier FAILED"
+            fi
             ;;
+
         5)
-            print_header "Running Backend Unit Tests"
+            print_header "ALL Non-Container Tests"
+            print_info "Slow tests auto-skip if ffmpeg is not on PATH."
+            _rc=0
             echo ""
-            # Ensure pytest is available
-            $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
-            $compose_cmd exec -T backend python -m pytest tests/unit/ -v --tb=short 2>&1
+            print_info "── 1/3  Renderer tests (unit + golden + integration) ─────────────"
+            if $python_cmd -m pytest -q --tb=short; then
+                print_success "Renderer tests PASSED"
+            else
+                print_warning "Renderer tests FAILED"
+                _rc=1
+            fi
+            echo ""
+            print_info "── 2/3  EDL schema contract ──────────────────────────────────────"
+            if (cd "$SCRIPT_DIR/backend" && \
+                $python_cmd -m pytest tests/contract/test_schema_validation.py \
+                    --noconftest -q --tb=short); then
+                print_success "EDL schema contract PASSED"
+            else
+                print_warning "EDL schema contract FAILED"
+                _rc=1
+            fi
+            echo ""
+            print_info "── 3/3  Contracts verifier ───────────────────────────────────────"
+            if $python_cmd third_party/contracts/tools/verify_contracts.py; then
+                print_success "Contracts verifier PASSED"
+            else
+                print_warning "Contracts verifier FAILED"
+                _rc=1
+            fi
+            echo ""
+            if [[ $_rc -eq 0 ]]; then
+                print_success "ALL non-container tests PASSED"
+            else
+                print_warning "One or more non-container tests FAILED (see output above)"
+            fi
             ;;
-        6)
-            print_header "AI Contract Tests (EditPlanV1 schema + AI endpoints + optional E2E)"
-            echo ""
 
-            # ── Part A: pytest contract tests (unit + integration) ──────────────
-            print_info "Running AI pytest contract tests inside backend container..."
-            echo ""
-            $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
-            if $compose_cmd exec -T backend python -m pytest \
-                    tests/integration/test_ai_endpoints.py \
-                    tests/unit/test_edit_plan.py \
-                    -v --tb=short 2>&1; then
-                print_success "AI pytest contract tests passed!"
-            else
-                print_warning "Some AI pytest contract tests failed"
-            fi
-            echo ""
+        # ══════════════════════════════════════════════════════════════════════
+        # CONTAINER-REQUIRED
+        # ══════════════════════════════════════════════════════════════════════
 
-            # ── Part B: validate_ai_contract.sh (contract + optional E2E) ──────
-            print_info "Running validate_ai_contract.sh..."
-            if [[ -n "${OPENAI_API_KEY:-}" ]]; then
-                print_info "OPENAI_API_KEY detected — E2E round-trip will run."
-            elif [[ "${RUN_OPENAI_ROUNDTRIP:-0}" == "1" ]]; then
-                print_info "RUN_OPENAI_ROUNDTRIP=1 — E2E round-trip with stub planner will run."
-            else
-                print_info "No OPENAI_API_KEY or RUN_OPENAI_ROUNDTRIP=1 set — contract-only mode."
-                print_info "  To run E2E: RUN_OPENAI_ROUNDTRIP=1 ./setup.sh  (or set OPENAI_API_KEY)"
+        6|7|8|9|10|11|12|13|14|15|16)
+            # Gate: containers must be running
+            if ! $compose_cmd ps 2>/dev/null | grep -qE "Up|running"; then
+                print_error "No containers are running."
+                print_info  "Start them first: main menu → option 1"
+                return 1
             fi
-            echo ""
-            if bash scripts/validate_ai_contract.sh 2>&1; then
-                print_success "validate_ai_contract.sh passed!"
-            else
-                print_warning "validate_ai_contract.sh reported failures (see above)"
-            fi
+
+            case $test_choice in
+
+                6)
+                    print_header "All Container Tests (backend + worker)"
+                    $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
+                    $compose_cmd exec -T worker  pip install pytest -q 2>/dev/null || true
+                    echo ""
+                    print_info "── Backend ───────────────────────────────────────────────────"
+                    if $compose_cmd exec -T backend python -m pytest tests/ -v --tb=short 2>&1; then
+                        print_success "Backend PASSED"
+                    else
+                        print_warning "Backend FAILED"
+                    fi
+                    echo ""
+                    print_info "── Worker ────────────────────────────────────────────────────"
+                    if $compose_cmd exec -T -e PYTHONPATH=/app worker \
+                            python -m pytest tests/ -v --tb=short 2>&1; then
+                        print_success "Worker PASSED"
+                    else
+                        print_warning "Worker FAILED"
+                    fi
+                    ;;
+
+                7)
+                    print_header "Backend — All Tests"
+                    $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
+                    if $compose_cmd exec -T backend python -m pytest tests/ -v --tb=short 2>&1; then
+                        print_success "Backend all tests PASSED"
+                    else
+                        print_warning "Backend all tests FAILED"
+                    fi
+                    ;;
+
+                8)
+                    print_header "Backend — Unit Tests"
+                    $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
+                    if $compose_cmd exec -T backend python -m pytest tests/unit/ -v --tb=short 2>&1; then
+                        print_success "Backend unit tests PASSED"
+                    else
+                        print_warning "Backend unit tests FAILED"
+                    fi
+                    ;;
+
+                9)
+                    print_header "Backend — Integration Tests"
+                    $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
+                    if $compose_cmd exec -T backend python -m pytest tests/integration/ -v --tb=short 2>&1; then
+                        print_success "Backend integration tests PASSED"
+                    else
+                        print_warning "Backend integration tests FAILED"
+                    fi
+                    ;;
+
+                10)
+                    print_header "Backend — E2E Tests"
+                    $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
+                    if $compose_cmd exec -T backend python -m pytest tests/e2e/ -v --tb=short 2>&1; then
+                        print_success "Backend e2e tests PASSED"
+                    else
+                        print_warning "Backend e2e tests FAILED"
+                    fi
+                    ;;
+
+                11)
+                    print_header "Backend — Contract Tests (determinism + roundtrip)"
+                    $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
+                    if $compose_cmd exec -T backend python -m pytest \
+                            tests/contract/determinism_test.py \
+                            tests/contract/roundtrip_test.py \
+                            -v --tb=short 2>&1; then
+                        print_success "Backend contract tests PASSED"
+                    else
+                        print_warning "Backend contract tests FAILED"
+                    fi
+                    ;;
+
+                12)
+                    print_header "Worker — All Tests"
+                    $compose_cmd exec -T worker pip install pytest -q 2>/dev/null || true
+                    if $compose_cmd exec -T -e PYTHONPATH=/app worker \
+                            python -m pytest tests/ -v --tb=short 2>&1; then
+                        print_success "Worker all tests PASSED"
+                    else
+                        print_warning "Worker all tests FAILED"
+                    fi
+                    ;;
+
+                13)
+                    print_header "Worker — Unit Tests"
+                    $compose_cmd exec -T worker pip install pytest -q 2>/dev/null || true
+                    if $compose_cmd exec -T -e PYTHONPATH=/app worker \
+                            python -m pytest tests/unit/ -v --tb=short 2>&1; then
+                        print_success "Worker unit tests PASSED"
+                    else
+                        print_warning "Worker unit tests FAILED"
+                    fi
+                    ;;
+
+                14)
+                    print_header "Worker — Golden Tests"
+                    $compose_cmd exec -T worker pip install pytest -q 2>/dev/null || true
+                    if $compose_cmd exec -T -e PYTHONPATH=/app worker \
+                            python -m pytest tests/golden/ -v --tb=short 2>&1; then
+                        print_success "Worker golden tests PASSED"
+                    else
+                        print_warning "Worker golden tests FAILED"
+                    fi
+                    ;;
+
+                15)
+                    print_header "AI Contract Tests (EditPlanV1 + AI endpoints)"
+                    $compose_cmd exec -T backend pip install pytest pytest-asyncio jsonschema -q 2>/dev/null || true
+                    echo ""
+                    print_info "── pytest: AI schema + endpoint tests ───────────────────────"
+                    if $compose_cmd exec -T backend python -m pytest \
+                            tests/integration/test_ai_endpoints.py \
+                            tests/unit/test_edit_plan.py \
+                            -v --tb=short 2>&1; then
+                        print_success "AI pytest contract tests PASSED"
+                    else
+                        print_warning "AI pytest contract tests FAILED"
+                    fi
+                    echo ""
+                    print_info "── validate_ai_contract.sh ──────────────────────────────────"
+                    if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+                        print_info "OPENAI_API_KEY detected — E2E round-trip will run."
+                    elif [[ "${RUN_OPENAI_ROUNDTRIP:-0}" == "1" ]]; then
+                        print_info "RUN_OPENAI_ROUNDTRIP=1 — E2E round-trip with stub planner will run."
+                    else
+                        print_info "No OPENAI_API_KEY / RUN_OPENAI_ROUNDTRIP=1 — contract-only mode."
+                        print_info "  To enable E2E: set OPENAI_API_KEY or RUN_OPENAI_ROUNDTRIP=1"
+                    fi
+                    if bash scripts/validate_ai_contract.sh 2>&1; then
+                        print_success "validate_ai_contract.sh PASSED"
+                    else
+                        print_warning "validate_ai_contract.sh FAILED (see above)"
+                    fi
+                    ;;
+
+                16)
+                    print_header "Worker render_real Integration Tests"
+                    print_info "Generating test assets and running host-side render_real tests..."
+                    echo ""
+                    bash "${SCRIPT_DIR}/scripts/run_integration_render_real.sh"
+                    ;;
+
+            esac
             ;;
-        7)
-            print_header "Running Worker render_real Integration Tests"
-            echo ""
-            print_info "Generating test assets and running host-side render_real tests..."
-            echo ""
-            bash "${SCRIPT_DIR}/scripts/run_integration_render_real.sh"
-            ;;
+
         0)
             return 0
             ;;
+
         *)
-            print_warning "Invalid choice"
+            print_warning "Invalid choice. Please enter 0-17."
             ;;
+
     esac
 }
 

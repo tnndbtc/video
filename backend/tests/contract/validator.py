@@ -84,7 +84,7 @@ def main() -> int:
     Returns:
         Exit code (0 for success)
     """
-    schema_path = Path(__file__).parent / "edl_schema.json"
+    schema_path = Path(__file__).resolve().parents[3] / "third_party" / "contracts" / "schemas" / "EditRequest.v1.json"
     vectors_dir = Path(__file__).parent / "test_vectors"
 
     # Check paths exist

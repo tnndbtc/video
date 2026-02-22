@@ -15,7 +15,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-SCHEMA_PATH = Path(__file__).parent / "edl_schema.json"
+SCHEMA_PATH = Path(__file__).resolve().parents[3] / "third_party" / "contracts" / "schemas" / "EditRequest.v1.json"
 
 
 @pytest.fixture(scope="module")
