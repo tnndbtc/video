@@ -24,7 +24,7 @@ class TestSmokeRender:
     def _need_ffmpeg(self, require_ffmpeg):
         """All tests require ffmpeg."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture(autouse=True, scope="class")
     def _need_artifacts(self):
         if not MANIFEST_PATH.exists() or not PLAN_PATH.exists():
             pytest.skip(f"Orchestrator artifacts not found at {ARTIFACTS}")

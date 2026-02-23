@@ -31,6 +31,12 @@ from renderer.preview_local import PreviewRenderer
 # Fallback shot duration (ms) when orchestrator manifest carries no timing data.
 _DEFAULT_SHOT_MS = 3_000
 
+# Minimum byte size for a file:// asset to be considered non-stub.
+# A 1×1 PNG (the smallest valid PNG) is ~67 bytes; any real image is far larger.
+# A WAV with audio data is > 44 bytes (44 = RIFF header only, 0 samples).
+# Files at or below this threshold are treated as placeholder stubs.
+_MIN_REAL_ASSET_BYTES = 100
+
 
 # ---------------------------------------------------------------------------
 # Schema adapters
@@ -142,6 +148,126 @@ def _adapt_plan(raw: dict, render_plan_path: Path) -> RenderPlan:
     )
 
 
+def _adapt_manifest_final(raw: dict, timing_lock_hash: str) -> AssetManifest:
+    """
+    Translate AssetManifest_final / AssetManifest.media JSON → renderer AssetManifest model.
+
+    Final / media layout
+    --------------------
+    items[]  flat list of resolved assets, each carrying:
+             asset_id    e.g. "bg-scene-001", "char-analyst",
+                              "vo-scene-001-commander-000"
+             asset_type  "background" | "character" | "prop" | "vo" | …
+             uri         resolved URI ("file://" or "placeholder://")
+             is_placeholder  bool
+
+    Shot reconstruction
+    -------------------
+    One Shot per background item.  scene_id is derived by stripping the "bg-"
+    prefix (e.g. "bg-scene-001" → "scene-001").  Characters are shared across
+    all shots.  VO items are assigned to the shot whose scene_id appears as a
+    substring in the VO asset_id.  Speaker is the second-to-last dash segment
+    of the VO asset_id ("vo-scene-001-commander-000" → "commander"); VO text is
+    unavailable in this format so an empty string is stored.
+    """
+    items = raw.get("items", [])
+
+    backgrounds = [i for i in items if i["asset_type"] == "background"]
+    characters  = [i for i in items if i["asset_type"] == "character"]
+    vo_items    = [i for i in items if i["asset_type"] == "vo"]
+
+    shots: list[Shot] = []
+    for bg in backgrounds:
+        bg_id    = bg["asset_id"]
+        scene_id = bg_id[len("bg-"):] if bg_id.startswith("bg-") else bg_id
+
+        visual_assets: list[VisualAsset] = [
+            VisualAsset(
+                asset_id=bg_id,
+                role="background",
+                asset_uri=bg.get("uri"),
+                placeholder=bg.get("is_placeholder", False),
+            )
+        ]
+        for cp in characters:
+            visual_assets.append(
+                VisualAsset(
+                    asset_id=cp["asset_id"],
+                    role="character",
+                    asset_uri=cp.get("uri"),
+                    placeholder=cp.get("is_placeholder", False),
+                )
+            )
+
+        vo_lines: list[VOLine] = []
+        for vo in vo_items:
+            vo_id = vo["asset_id"]
+            if scene_id not in vo_id:
+                continue
+            parts     = vo_id.split("-")
+            speaker_id = parts[-2] if len(parts) >= 2 else "unknown"
+            vo_lines.append(VOLine(line_id=vo_id, speaker_id=speaker_id, text=""))
+
+        shots.append(
+            Shot(
+                shot_id=scene_id,
+                duration_ms=_DEFAULT_SHOT_MS,
+                visual_assets=visual_assets,
+                vo_lines=vo_lines,
+            )
+        )
+
+    return AssetManifest(
+        schema_version=raw.get("schema_version", "1.0.0"),
+        manifest_id=raw["manifest_id"],
+        project_id=raw.get("project_id", raw["manifest_id"]),
+        shotlist_ref=raw.get("shotlist_ref", ""),
+        timing_lock_hash=timing_lock_hash,
+        shots=shots,
+    )
+
+
+def _is_stub_file(uri: str) -> bool:
+    """
+    Return True when a file:// URI points to a file that is too small to be
+    real media (i.e. a stub / empty placeholder written by test tooling).
+
+    A 45-byte "PNG" carries only magic bytes + a bare IHDR + empty IDAT + IEND;
+    a 44-byte WAV is the RIFF header alone with zero audio samples.  Both are
+    indistinguishable from placeholder://  at render time because the renderer
+    falls back to Pillow-generated images when Pillow cannot decode the file.
+
+    Does not raise — returns False for any IO error so callers stay simple.
+    """
+    if not uri.startswith("file://"):
+        return False
+    try:
+        return Path(uri[len("file://"):]).stat().st_size <= _MIN_REAL_ASSET_BYTES
+    except OSError:
+        return False
+
+
+def _collect_placeholders(
+    manifest: AssetManifest, plan: RenderPlan
+) -> list[tuple[str, str, str]]:
+    """
+    Return (shot_id, asset_id, uri) for every visual slot whose resolved URI
+    is absent or starts with 'placeholder://'.
+
+    Does NOT call path.exists() — avoids blocking on unavailable network/FUSE mounts.
+    Stub file:// assets (size ≤ _MIN_REAL_ASSET_BYTES) are included alongside
+    placeholder:// URIs.
+    """
+    out: list[tuple[str, str, str]] = []
+    for shot in manifest.shots:
+        for asset in shot.visual_assets:
+            uri = plan.asset_resolutions.get(asset.asset_id) or asset.asset_uri
+            if not uri or uri.startswith("placeholder://") or _is_stub_file(uri):
+                out.append((shot.shot_id, asset.asset_id, uri or "<no uri>"))
+    return out
+
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
@@ -199,14 +325,47 @@ def main() -> None:
         raw_manifest = json.loads(args.asset_manifest.read_text(encoding="utf-8"))
         raw_plan = json.loads(args.render_plan.read_text(encoding="utf-8"))
 
-        # Format auto-detect: native Pydantic format has a top-level "shots" key;
-        # orchestrator format uses "backgrounds" / "character_packs" / "vo_items".
+        # Format auto-detect:
+        #   native Pydantic      → top-level "shots" key
+        #   orchestrator draft   → "backgrounds" / "character_packs" / "vo_items"
+        #   final / media        → flat "items" list (AssetManifest_final or
+        #                          AssetManifest.media; no scene structure, URIs resolved)
         if "shots" in raw_manifest:
             manifest = AssetManifest.model_validate(raw_manifest)
             plan = RenderPlan.model_validate(raw_plan)
+        elif "items" in raw_manifest:
+            manifest = _adapt_manifest_final(raw_manifest, raw_plan["timing_lock_hash"])
+            plan = _adapt_plan(raw_plan, args.render_plan)
         else:
             manifest = _adapt_manifest(raw_manifest, raw_plan["timing_lock_hash"])
             plan = _adapt_plan(raw_plan, args.render_plan)
+
+        # Guard 1: no shots at all (format mismatch or empty backgrounds list)
+        if not manifest.shots:
+            print(
+                "No shots found in the manifest.\n"
+                "Check your AssetManifest format — expected 'shots' (native) or\n"
+                "'backgrounds'/'character_packs'/'vo_items' (orchestrator) keys.",
+                file=sys.stderr,
+            )
+            sys.exit(0)
+
+        # Guard 2: any visual slot is a placeholder URI or stub file.
+        # Collect all offending slots first; if there are any, list them and
+        # exit — the user must fix every placeholder before a render is valid.
+        # FFmpeg is only reached when this list is empty (all assets are real).
+        slots = _collect_placeholders(manifest, plan)
+        if slots:
+            print(
+                f"{len(slots)} placeholder/stub slot(s) found across "
+                f"{len(manifest.shots)} shot(s) — fix all of them before rendering.\n"
+                f"(Stub = file:// asset ≤ {_MIN_REAL_ASSET_BYTES} bytes; "
+                "these are test fixtures, not real media.)",
+                file=sys.stderr,
+            )
+            for shot_id, asset_id, uri in slots:
+                print(f"  [{shot_id}]  {asset_id}  →  {uri}", file=sys.stderr)
+            sys.exit(0)
 
         args.out_dir.mkdir(parents=True, exist_ok=True)
 
