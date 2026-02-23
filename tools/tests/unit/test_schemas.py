@@ -8,15 +8,23 @@ Tests:
   - Default value correctness
   - timing_lock_hash presence in both AssetManifest and RenderPlan
   - _canonical_json_hash stability (same object → same hash across repeated calls)
+  - Contract schema compliance: Pydantic models and golden fixtures validate
+    against the canonical JSON schemas in third_party/contracts/schemas/
 
 No ffmpeg required.
 """
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+
+from verify_contracts import check_schema, CONTRACTS_DIR as _CONTRACTS_DIR
+
+_SCHEMAS_DIR = _CONTRACTS_DIR / "schemas"
+_GOLDENS_DIR = _CONTRACTS_DIR / "goldens"
 
 from schemas.asset_manifest import AssetManifest, Shot, VisualAsset, VOLine, SFXItem
 from schemas.render_plan import FallbackConfig, RenderPlan, Resolution
@@ -393,3 +401,90 @@ class TestRenderFingerprint:
             frame_hashes=["hash1", "hash2"],
         )
         assert fp.frame_hashes == ["hash1", "hash2"]
+
+
+# ===========================================================================
+# Contract schema compliance
+# Validates that (a) the canonical golden fixtures and (b) documents produced
+# by the Pydantic models conform to the v1.json schemas in
+# third_party/contracts/schemas/.  These tests catch drift between the Python
+# models and the published contracts.
+# ===========================================================================
+
+class TestContractSchemaCompliance:
+    """Golden fixtures and Pydantic model output must pass the v1.json schemas."""
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _load_golden(suite: str, filename: str) -> dict:
+        path = _GOLDENS_DIR / suite / filename
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _assert_valid(data: dict, schema_id: str) -> None:
+        errors = check_schema(data, schema_id, _SCHEMAS_DIR)
+        assert errors == [], f"Contract violations for {schema_id!r}:\n" + "\n".join(errors)
+
+    # ------------------------------------------------------------------
+    # Golden fixture → schema
+    # ------------------------------------------------------------------
+
+    def test_golden_asset_manifest_final_passes_schema(self):
+        data = self._load_golden("e2e/example_episode", "AssetManifest_final.json")
+        self._assert_valid(data, "AssetManifest_final")
+
+    def test_golden_render_plan_passes_schema(self):
+        data = self._load_golden("e2e/example_episode", "RenderPlan.json")
+        self._assert_valid(data, "RenderPlan")
+
+    def test_golden_render_output_passes_schema(self):
+        data = self._load_golden("e2e/example_episode", "RenderOutput.json")
+        self._assert_valid(data, "RenderOutput")
+
+    def test_minimal_golden_asset_manifest_final_passes_schema(self):
+        data = self._load_golden("minimal", "AssetManifest_final.json")
+        self._assert_valid(data, "AssetManifest_final")
+
+    def test_minimal_golden_render_plan_passes_schema(self):
+        data = self._load_golden("minimal", "RenderPlan.json")
+        self._assert_valid(data, "RenderPlan")
+
+    def test_minimal_golden_render_output_passes_schema(self):
+        data = self._load_golden("minimal", "RenderOutput.json")
+        self._assert_valid(data, "RenderOutput")
+
+    # ------------------------------------------------------------------
+    # Pydantic model output → schema
+    # A full RenderOutput produced by the model must satisfy the contract.
+    # video_uri / captions_uri must be non-null strings (as the contract
+    # requires); dry-run nulls are a renderer-internal state, not a
+    # contract-level output.
+    # ------------------------------------------------------------------
+
+    def test_render_output_model_produces_contract_valid_json(self):
+        ro = RenderOutput(
+            output_id="test-output-001",
+            request_id="test-request-001",
+            render_plan_ref="file:///test/RenderPlan.json",
+            video_uri="file:///test/output.mp4",
+            captions_uri="file:///test/output.srt",
+            hashes=OutputHashes(
+                video_sha256="a" * 64,
+                captions_sha256="b" * 64,
+            ),
+            provenance=Provenance(
+                render_profile="preview",
+                timing_lock_hash="c" * 64,
+                rendered_at="1970-01-01T00:00:00Z",
+                ffmpeg_version="6.1.1",
+            ),
+            lineage=Lineage(
+                asset_manifest_hash="d" * 64,
+                render_plan_hash="e" * 64,
+            ),
+        )
+        data = json.loads(ro.model_dump_json())
+        self._assert_valid(data, "RenderOutput")

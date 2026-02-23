@@ -24,9 +24,16 @@ _TOOLS_ROOT = Path(__file__).resolve().parents[1] / "tools"
 if str(_TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(_TOOLS_ROOT))
 
+_CONTRACTS_TOOLS = Path(__file__).resolve().parents[1] / "third_party" / "contracts" / "tools"
+if str(_CONTRACTS_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_CONTRACTS_TOOLS))
+
+_CONTRACTS_SCHEMAS_DIR = Path(__file__).resolve().parents[1] / "third_party" / "contracts" / "schemas"
+
 from schemas.asset_manifest import AssetManifest, Shot, VisualAsset, VOLine
 from schemas.render_plan import FallbackConfig, RenderPlan, Resolution
 from renderer.preview_local import PreviewRenderer
+from verify_contracts import check_schema
 
 # Fallback shot duration (ms) when orchestrator manifest carries no timing data.
 _DEFAULT_SHOT_MS = 3_000
@@ -36,6 +43,34 @@ _DEFAULT_SHOT_MS = 3_000
 # A WAV with audio data is > 44 bytes (44 = RIFF header only, 0 samples).
 # Files at or below this threshold are treated as placeholder stubs.
 _MIN_REAL_ASSET_BYTES = 100
+
+
+# ---------------------------------------------------------------------------
+# Contract validation
+# ---------------------------------------------------------------------------
+
+def _validate_contract(data: dict, label: str) -> None:
+    """Validate *data* against its contract JSON schema.
+
+    The schema is located via the document's own ``schema_id`` field, which
+    maps directly into verify_contracts.SCHEMA_MAP
+    (e.g. "AssetManifest_final" → AssetManifest_final.v1.json).
+
+    Exits with code 1 and a human-readable message on validation failure.
+    Silently passes when schema_id is absent or has no SCHEMA_MAP entry —
+    unknown/internal formats are not penalised.
+    """
+    schema_id = data.get("schema_id")
+    if not schema_id:
+        return  # no schema_id → can't resolve schema; skip silently
+
+    errors = check_schema(data, schema_id, _CONTRACTS_SCHEMAS_DIR)
+    if errors:
+        print(f"Contract validation FAILED for {label} (schema_id={schema_id!r}):",
+              file=sys.stderr)
+        for err in errors:
+            print(f"  {err}", file=sys.stderr)
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +360,10 @@ def main() -> None:
         raw_manifest = json.loads(args.asset_manifest.read_text(encoding="utf-8"))
         raw_plan = json.loads(args.render_plan.read_text(encoding="utf-8"))
 
+        # Validate inputs against canonical contracts before doing any work.
+        _validate_contract(raw_manifest, f"asset manifest ({args.asset_manifest.name})")
+        _validate_contract(raw_plan,     f"render plan ({args.render_plan.name})")
+
         # Format auto-detect:
         #   native Pydantic      → top-level "shots" key
         #   orchestrator draft   → "backgrounds" / "character_packs" / "vo_items"
@@ -383,6 +422,14 @@ def main() -> None:
                 asset_manifest_ref=asset_manifest_ref,
                 dry_run=args.dry_run,
             ).render()
+            # Validate the produced RenderOutput against its contract schema.
+            # Skipped in dry-run: video_uri / captions_uri are null there and the
+            # contract schema requires strings (no partial-output contract exists yet).
+            if not args.dry_run:
+                _validate_contract(
+                    json.loads(result.model_dump_json()),
+                    "render output",
+                )
             print(result.model_dump_json(indent=2))
 
     except Exception as exc:  # noqa: BLE001

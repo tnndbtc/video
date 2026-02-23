@@ -8,7 +8,8 @@ These tests verify:
   4. Placeholder handling — shots with no asset produce a placeholder and the
      render still completes (placeholder_count > 0).
   5. SRT generation — output.srt is non-empty and contains expected speaker labels.
-  6. RenderOutput schema — render_output.json round-trips through the Pydantic model.
+  6. RenderOutput contract — render_output.json round-trips through the Pydantic
+     model AND validates against RenderOutput.v1.json contract schema.
 
 Requires: ffmpeg >= 6.1 on PATH.
 Run:
@@ -20,6 +21,7 @@ Regenerate expected hashes after intentional renderer changes:
 """
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -27,6 +29,9 @@ import pytest
 
 from renderer.preview_local import PreviewRenderer
 from schemas.render_output import RenderOutput
+from verify_contracts import check_schema, CONTRACTS_DIR as _CONTRACTS_DIR
+
+_SCHEMAS_DIR = _CONTRACTS_DIR / "schemas"
 
 EXPECTED_DIR = Path(__file__).parent / "expected"
 GOLDEN_HASH_FILE = EXPECTED_DIR / "render_preview_5shots.framemd5"
@@ -191,14 +196,15 @@ class TestPreviewGolden:
     def test_render_output_json_schema_valid(
         self, sample_manifest, sample_plan, tmp_path: Path
     ):
-        """render_output.json must round-trip through RenderOutput Pydantic model."""
+        """render_output.json must round-trip through the Pydantic model AND pass
+        the canonical RenderOutput.v1.json contract schema."""
         out = tmp_path / "render_json"
         result = PreviewRenderer(sample_manifest, sample_plan, output_dir=out).render()
 
         json_path = out / "render_output.json"
         assert json_path.exists()
 
-        # Re-parse from disk and compare.
+        # Re-parse from disk and verify Pydantic-level fields.
         from_disk = RenderOutput.model_validate_json(json_path.read_text())
         assert from_disk.lineage.asset_manifest_hash == result.lineage.asset_manifest_hash
         assert from_disk.hashes.video_sha256 == result.hashes.video_sha256
@@ -206,6 +212,14 @@ class TestPreviewGolden:
         assert from_disk.schema_version == "0.0.1"
         assert from_disk.schema_id == "RenderOutput"
         assert from_disk.producer.name == "PreviewRenderer"
+
+        # Validate the on-disk JSON against the canonical contract schema.
+        data = json.loads(json_path.read_text())
+        errors = check_schema(data, "RenderOutput", _SCHEMAS_DIR)
+        assert errors == [], (
+            "render_output.json failed RenderOutput.v1.json contract:\n"
+            + "\n".join(errors)
+        )
 
     def test_timing_lock_hash_mismatch_raises(self, sample_manifest, tmp_path: Path):
         """Mismatched timing_lock_hash must raise ValueError before any ffmpeg call."""
